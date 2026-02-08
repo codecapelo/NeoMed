@@ -34,6 +34,37 @@ import { EnhancedTextField, EnhancedTextArea, CID10Selector } from '../component
 import PatientFilter from '../components/patients/PatientFilter';
 import { useData } from '../context/DataContext';
 
+const onlyDigits = (value: string) => value.replace(/\D/g, '');
+
+const formatCpf = (value: string) => {
+  const digits = onlyDigits(value).slice(0, 11);
+  return digits
+    .replace(/^(\d{3})(\d)/, '$1.$2')
+    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1-$2');
+};
+
+const isValidCpf = (value: string) => {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) {
+    return false;
+  }
+
+  const calcDigit = (base: string, factor: number) => {
+    let total = 0;
+    for (const digit of base) {
+      total += Number(digit) * factor;
+      factor -= 1;
+    }
+    const mod = total % 11;
+    return mod < 2 ? 0 : 11 - mod;
+  };
+
+  const digit1 = calcDigit(cpf.slice(0, 9), 10);
+  const digit2 = calcDigit(cpf.slice(0, 10), 11);
+  return digit1 === Number(cpf[9]) && digit2 === Number(cpf[10]);
+};
+
 // Mapeamento de tipos para resolver incompatibilidade entre tipos Patient
 const mapToContextPatient = (patient: Patient): any => {
   // Mapeia paciente do tipo da página para o tipo do contexto
@@ -59,6 +90,7 @@ const initialPatients: Patient[] = [
   {
     id: '1',
     name: 'João Silva',
+    cpf: '123.456.789-09',
     dateOfBirth: '1985-05-15',
     gender: 'male',
     email: 'joao.silva@email.com',
@@ -75,6 +107,7 @@ const initialPatients: Patient[] = [
   {
     id: '2',
     name: 'Maria Oliveira',
+    cpf: '529.982.247-25',
     dateOfBirth: '1990-10-20',
     gender: 'female',
     email: 'maria.oliveira@email.com',
@@ -181,9 +214,25 @@ const Patients: React.FC = () => {
 
   const handleSave = () => {
     try {
+      if (!currentPatient.name?.trim()) {
+        showSnackbar('Nome completo é obrigatório.', 'warning');
+        return;
+      }
+
+      const cpf = formatCpf(currentPatient.cpf || '');
+      if (!cpf) {
+        showSnackbar('CPF é obrigatório para cadastrar paciente.', 'warning');
+        return;
+      }
+
+      if (!isValidCpf(cpf)) {
+        showSnackbar('Informe um CPF válido.', 'warning');
+        return;
+      }
+
       if (isEditing && currentPatient.id) {
         // Atualizar paciente existente
-        const contextPatient = mapToContextPatient(currentPatient as Patient);
+        const contextPatient = mapToContextPatient({ ...(currentPatient as Patient), cpf });
         updatePatient(contextPatient);
         showSnackbar('Paciente atualizado com sucesso', 'success');
       } else {
@@ -191,6 +240,7 @@ const Patients: React.FC = () => {
         const newPatient: Patient = {
           id: Date.now().toString(), // Usar timestamp como ID
           name: currentPatient.name || '',
+          cpf,
           email: currentPatient.email || '',
           phone: currentPatient.phone || '',
           dateOfBirth: currentPatient.dateOfBirth || '',
@@ -262,6 +312,7 @@ const Patients: React.FC = () => {
   const filteredPatients = patients.filter(patient => {
     const matchesSearch = searchTerm === '' || 
       patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      patient.cpf?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       patient.email?.toLowerCase().includes(searchTerm.toLowerCase()) || 
       patient.phone?.toLowerCase().includes(searchTerm.toLowerCase());
     
@@ -346,6 +397,7 @@ const Patients: React.FC = () => {
           <TableHead>
             <TableRow>
               <TableCell>Nome</TableCell>
+              <TableCell>CPF</TableCell>
               <TableCell>Data Nasc.</TableCell>
               <TableCell>Contato</TableCell>
               <TableCell>Plano de Saúde</TableCell>
@@ -360,6 +412,7 @@ const Patients: React.FC = () => {
               .map(patient => (
                 <TableRow key={patient.id}>
                   <TableCell>{patient.name}</TableCell>
+                  <TableCell>{patient.cpf || '-'}</TableCell>
                   <TableCell>{formatDate(patient.dateOfBirth)}</TableCell>
                   <TableCell>
                     {patient.phone}<br/>
@@ -384,7 +437,7 @@ const Patients: React.FC = () => {
               ))}
             {filteredPatients.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} align="center">
+                <TableCell colSpan={8} align="center">
                   Nenhum paciente encontrado
                 </TableCell>
               </TableRow>
@@ -408,7 +461,7 @@ const Patients: React.FC = () => {
         <DialogTitle>{isEditing ? 'Editar Paciente' : 'Novo Paciente'}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={8}>
+            <Grid item xs={12} md={6}>
               <EnhancedTextField
                 fullWidth
                 label="Nome Completo"
@@ -417,7 +470,17 @@ const Patients: React.FC = () => {
                 required
               />
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid item xs={12} md={3}>
+              <EnhancedTextField
+                fullWidth
+                label="CPF"
+                value={currentPatient.cpf || ''}
+                onChange={(e) => setCurrentPatient({...currentPatient, cpf: formatCpf(e.target.value)})}
+                required
+                inputProps={{ maxLength: 14 }}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
               <TextField
                 fullWidth
                 label="Data de Nascimento"

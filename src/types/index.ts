@@ -1,6 +1,7 @@
 export interface Patient {
   id: string;
   name: string;
+  cpf?: string;
   dateOfBirth: string;
   gender: 'male' | 'female' | 'other';
   email: string;

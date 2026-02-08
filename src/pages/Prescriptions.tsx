@@ -49,6 +49,7 @@ import {
   CloudUpload as CloudUploadIcon,
   FactCheck as FactCheckIcon,
   OpenInNew as OpenInNewIcon,
+  FileDownload as FileDownloadIcon,
 } from '@mui/icons-material';
 import { Prescription, Medication, Patient, MevoDocumentStatus } from '../types';
 import { EnhancedTextField, EnhancedTextArea } from '../components/common';
@@ -1368,8 +1369,70 @@ const Prescriptions: React.FC = () => {
     return provider === 'bird_id' ? 'Bird ID' : 'Viddas';
   };
 
+  const getGenderLabel = (gender?: string) => {
+    if (gender === 'male') return 'Masculino';
+    if (gender === 'female') return 'Feminino';
+    if (gender === 'other') return 'Outro';
+    return '';
+  };
+
+  const formatDateToBR = (value?: string) => {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleDateString('pt-BR');
+  };
+
+  const escapeCsvValue = (value: string) => {
+    const normalized = value ?? '';
+    if (/[",\n]/.test(normalized)) {
+      return `"${normalized.replace(/"/g, '""')}"`;
+    }
+    return normalized;
+  };
+
   const getProviderQuickLink = (provider: MevoSignatureProvider) => {
     return provider === 'bird_id' ? mevoBirdIdUrl : mevoViddasUrl;
+  };
+
+  const handleDownloadSelectedPatientCsv = () => {
+    if (!selectedPatientForMevo) {
+      setMevoFeedback({
+        severity: 'info',
+        message: 'Selecione um paciente para baixar os dados em CSV.',
+      });
+      return;
+    }
+
+    const header = ['Nome Completo', 'Celular', 'CPF', 'Sexo', 'Data de Nascimento', 'Email'];
+    const row = [
+      selectedPatientForMevo.name || '',
+      selectedPatientForMevo.phone || '',
+      selectedPatientForMevo.cpf || '',
+      getGenderLabel(selectedPatientForMevo.gender),
+      formatDateToBR(selectedPatientForMevo.dateOfBirth || selectedPatientForMevo.birthDate),
+      selectedPatientForMevo.email || '',
+    ];
+
+    const csvContent = `${header.join(',')}\n${row.map((item) => escapeCsvValue(String(item || ''))).join(',')}\n`;
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeName = (selectedPatientForMevo.name || 'paciente')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .toLowerCase();
+
+    link.href = url;
+    link.download = `${safeName || 'paciente'}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const getMevoStatusLabel = (status: string) => {
@@ -1853,41 +1916,56 @@ const Prescriptions: React.FC = () => {
                   gap: 2,
                 }}
               >
-                <Autocomplete
-                  options={patientOptions}
-                  value={patientOptions.find((patient) => patient.id === currentPrescription.patientId) || null}
-                  onChange={(_, patient) =>
-                    setCurrentPrescription({
-                      ...currentPrescription,
-                      patientId: patient?.id || '',
-                    })
-                  }
-                  getOptionLabel={(option) => option.name || 'Paciente sem nome'}
-                  isOptionEqualToValue={(option, value) => option.id === value.id}
-                  noOptionsText={patients.length ? 'Nenhum paciente encontrado' : 'Nenhum paciente cadastrado'}
-                  openOnFocus
-                  autoHighlight
-                  renderOption={(props, option) => (
-                    <Box component="li" {...props}>
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {option.name}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {option.phone || option.email || 'Sem telefone/email'}
-                        </Typography>
+                <Box display="flex" gap={1} alignItems="flex-start">
+                  <Autocomplete
+                    sx={{ flex: 1 }}
+                    options={patientOptions}
+                    value={patientOptions.find((patient) => patient.id === currentPrescription.patientId) || null}
+                    onChange={(_, patient) =>
+                      setCurrentPrescription({
+                        ...currentPrescription,
+                        patientId: patient?.id || '',
+                      })
+                    }
+                    getOptionLabel={(option) => option.name || 'Paciente sem nome'}
+                    isOptionEqualToValue={(option, value) => option.id === value.id}
+                    noOptionsText={patients.length ? 'Nenhum paciente encontrado' : 'Nenhum paciente cadastrado'}
+                    openOnFocus
+                    autoHighlight
+                    renderOption={(props, option) => (
+                      <Box component="li" {...props}>
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {option.name}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {option.cpf || option.phone || option.email || 'Sem CPF/telefone/email'}
+                          </Typography>
+                        </Box>
                       </Box>
-                    </Box>
-                  )}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Paciente"
-                      placeholder="Buscar paciente por nome"
-                      helperText="Clique e digite para filtrar pacientes"
-                    />
-                  )}
-                />
+                    )}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Paciente"
+                        placeholder="Buscar paciente por nome"
+                        helperText="Clique e digite para filtrar pacientes"
+                      />
+                    )}
+                  />
+                  <Tooltip title={selectedPatientForMevo ? 'Baixar dados do paciente (CSV)' : 'Selecione um paciente'}>
+                    <span>
+                      <IconButton
+                        color="primary"
+                        onClick={handleDownloadSelectedPatientCsv}
+                        disabled={!selectedPatientForMevo}
+                        sx={{ mt: 1 }}
+                      >
+                        <FileDownloadIcon />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
 
                 <EnhancedTextField
                   label="Data da Prescrição"

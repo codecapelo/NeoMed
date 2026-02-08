@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -80,10 +80,15 @@ const mockPatients: Patient[] = [
   }
 ];
 
-// Dados mockados de medicamentos para exemplo
-const mockMedications: Medication[] = [
+interface MedicationCatalogItem extends Medication {
+  category: string;
+}
+
+// Catálogo base para seleção rápida de medicamentos no formulário
+const medicationCatalog: MedicationCatalogItem[] = [
   {
     id: '1',
+    category: 'Cardiovascular',
     name: 'Losartana Potássica',
     dosage: '50mg',
     frequency: '1x ao dia',
@@ -94,6 +99,7 @@ const mockMedications: Medication[] = [
   },
   {
     id: '2',
+    category: 'Endocrinologia',
     name: 'Metformina',
     dosage: '500mg',
     frequency: '2x ao dia',
@@ -104,6 +110,7 @@ const mockMedications: Medication[] = [
   },
   {
     id: '3',
+    category: 'Cardiovascular',
     name: 'Atenolol',
     dosage: '25mg',
     frequency: '1x ao dia',
@@ -111,8 +118,175 @@ const mockMedications: Medication[] = [
     instructions: 'Tomar pela manhã',
     sideEffects: ['Fadiga', 'Mãos frias', 'Tontura'],
     contraindications: ['Asma', 'Bradicardia']
+  },
+  {
+    id: '4',
+    category: 'Cardiovascular',
+    name: 'Amlodipino',
+    dosage: '5mg',
+    frequency: '1x ao dia',
+    duration: '30 dias',
+    instructions: 'Tomar no mesmo horário todos os dias',
+    sideEffects: ['Edema de membros inferiores', 'Rubor', 'Cefaleia'],
+    contraindications: ['Hipotensão grave']
+  },
+  {
+    id: '5',
+    category: 'Cardiovascular',
+    name: 'Enalapril',
+    dosage: '10mg',
+    frequency: '2x ao dia',
+    duration: '30 dias',
+    instructions: 'Tomar conforme orientação, com controle pressórico',
+    sideEffects: ['Tosse seca', 'Tontura'],
+    contraindications: ['Gestação', 'Estenose bilateral de artéria renal']
+  },
+  {
+    id: '6',
+    category: 'Analgésicos e Anti-inflamatórios',
+    name: 'Paracetamol',
+    dosage: '750mg',
+    frequency: 'A cada 8 horas se dor',
+    duration: '5 dias',
+    instructions: 'Não exceder dose diária máxima',
+    sideEffects: ['Náusea', 'Reação cutânea rara'],
+    contraindications: ['Doença hepática grave']
+  },
+  {
+    id: '7',
+    category: 'Analgésicos e Anti-inflamatórios',
+    name: 'Ibuprofeno',
+    dosage: '600mg',
+    frequency: 'A cada 8 horas',
+    duration: '5 dias',
+    instructions: 'Tomar após alimentação',
+    sideEffects: ['Dor epigástrica', 'Náusea'],
+    contraindications: ['Úlcera ativa', 'Insuficiência renal grave']
+  },
+  {
+    id: '8',
+    category: 'Analgésicos e Anti-inflamatórios',
+    name: 'Diclofenaco Potássico',
+    dosage: '50mg',
+    frequency: 'A cada 8 horas',
+    duration: '5 dias',
+    instructions: 'Tomar após refeições',
+    sideEffects: ['Desconforto gástrico', 'Tontura'],
+    contraindications: ['Doença ulcerosa ativa', 'Insuficiência cardíaca grave']
+  },
+  {
+    id: '9',
+    category: 'Antibióticos',
+    name: 'Amoxicilina',
+    dosage: '500mg',
+    frequency: 'A cada 8 horas',
+    duration: '7 dias',
+    instructions: 'Completar o tratamento prescrito',
+    sideEffects: ['Diarreia', 'Náusea', 'Rash cutâneo'],
+    contraindications: ['Alergia a penicilinas']
+  },
+  {
+    id: '10',
+    category: 'Antibióticos',
+    name: 'Azitromicina',
+    dosage: '500mg',
+    frequency: '1x ao dia',
+    duration: '3 dias',
+    instructions: 'Tomar no mesmo horário diariamente',
+    sideEffects: ['Náusea', 'Dor abdominal'],
+    contraindications: ['Hipersensibilidade a macrolídeos']
+  },
+  {
+    id: '11',
+    category: 'Antibióticos',
+    name: 'Cefalexina',
+    dosage: '500mg',
+    frequency: 'A cada 6 horas',
+    duration: '7 dias',
+    instructions: 'Manter intervalo regular entre as doses',
+    sideEffects: ['Diarreia', 'Náusea'],
+    contraindications: ['Alergia a cefalosporinas']
+  },
+  {
+    id: '12',
+    category: 'Gastrointestinal',
+    name: 'Omeprazol',
+    dosage: '20mg',
+    frequency: '1x ao dia',
+    duration: '30 dias',
+    instructions: 'Tomar em jejum, 30 minutos antes do café',
+    sideEffects: ['Dor de cabeça', 'Distensão abdominal'],
+    contraindications: ['Hipersensibilidade à substância']
+  },
+  {
+    id: '13',
+    category: 'Gastrointestinal',
+    name: 'Ondansetrona',
+    dosage: '4mg',
+    frequency: 'A cada 8 horas se náusea',
+    duration: '3 dias',
+    instructions: 'Usar se necessário conforme prescrição',
+    sideEffects: ['Constipação', 'Cefaleia'],
+    contraindications: ['Uso concomitante com apomorfina']
+  },
+  {
+    id: '14',
+    category: 'Respiratório e Alergias',
+    name: 'Loratadina',
+    dosage: '10mg',
+    frequency: '1x ao dia',
+    duration: '10 dias',
+    instructions: 'Tomar preferencialmente no mesmo horário',
+    sideEffects: ['Sonolência leve', 'Boca seca'],
+    contraindications: ['Hipersensibilidade à loratadina']
+  },
+  {
+    id: '15',
+    category: 'Respiratório e Alergias',
+    name: 'Desloratadina',
+    dosage: '5mg',
+    frequency: '1x ao dia',
+    duration: '10 dias',
+    instructions: 'Tomar com ou sem alimentos',
+    sideEffects: ['Fadiga', 'Boca seca'],
+    contraindications: ['Hipersensibilidade ao fármaco']
+  },
+  {
+    id: '16',
+    category: 'Respiratório e Alergias',
+    name: 'Salbutamol Spray',
+    dosage: '100mcg/jato',
+    frequency: '2 jatos se falta de ar',
+    duration: 'Conforme necessidade',
+    instructions: 'Aplicar com técnica inalatória correta',
+    sideEffects: ['Tremor', 'Taquicardia transitória'],
+    contraindications: ['Hipersensibilidade ao componente']
+  },
+  {
+    id: '17',
+    category: 'Endocrinologia',
+    name: 'Gliclazida',
+    dosage: '30mg',
+    frequency: '1x ao dia',
+    duration: '30 dias',
+    instructions: 'Tomar junto ao café da manhã',
+    sideEffects: ['Hipoglicemia', 'Tontura'],
+    contraindications: ['Diabetes tipo 1', 'Cetoacidose diabética']
+  },
+  {
+    id: '18',
+    category: 'Endocrinologia',
+    name: 'Levotiroxina',
+    dosage: '50mcg',
+    frequency: '1x ao dia',
+    duration: '30 dias',
+    instructions: 'Tomar em jejum, sem outros medicamentos concomitantes',
+    sideEffects: ['Palpitação', 'Insônia se dose excessiva'],
+    contraindications: ['Tireotoxicose não tratada']
   }
 ];
+
+const mockMedications: Medication[] = medicationCatalog.map(({ category, ...medication }) => medication);
 
 // Dados mockados de prescrições para exemplo
 const mockPrescriptions: Prescription[] = [
@@ -470,32 +644,8 @@ const CalculoDosePediatrica: React.FC<{
     }
   };
 
-  // Criar lista de medicamentos para o select, integrando medicamentos existentes
   const listaCompletaMedicamentos = [
-    // Categorias e medicamentos do cálculo pediátrico (pipo)
     ...pipo,
-    
-    // Adicionar categoria para os medicamentos existentes
-    {
-      _nome: "Medicamentos da Lista Padrão",
-      _operacao: "",
-      _maximo: "",
-      _descricao: "",
-      _unidade: "",
-      _tipo: "optgroup" as const
-    },
-    
-    // Converter medicamentos existentes (mockMedications) para o formato do pipo
-    ...mockMedications.map(med => ({
-      _nome: `${med.name} ${med.dosage}`,
-      _operacao: "*1", // Operação padrão, multiplicar pelo peso
-      _maximo: "0",    // Sem máximo definido
-      _descricao: med.instructions || "Conforme orientação médica",
-      _unidade: med.dosage.replace(/[0-9]/g, '').trim(), // Extrai a unidade da dosagem
-      _tipo: "option" as const
-    })),
-    
-    // Opção para medicamento personalizado
     {
       _nome: "Adicionar outro medicamento",
       _operacao: "",
@@ -515,7 +665,7 @@ const CalculoDosePediatrica: React.FC<{
   ];
 
   return (
-    <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, mb: 2 }}>
+      <Box sx={{ p: 2, border: '1px solid #e0e0e0', borderRadius: 1, mb: 2 }}>
       <Box display="flex" alignItems="center" mb={2}>
         <CalculateIcon color="primary" sx={{ mr: 1 }} />
         <Typography variant="h6">Cálculo de Dose Pediátrica</Typography>
@@ -526,6 +676,10 @@ const CalculoDosePediatrica: React.FC<{
         </Tooltip>
       </Box>
       
+      <Alert severity="info" sx={{ mb: 2 }}>
+        Use o cálculo pediátrico apenas com validação clínica. Para prescrição comum, utilize "Adicionar Medicamento".
+      </Alert>
+
       <Grid container spacing={2}>
         <Grid item xs={12} sm={4}>
           <TextField
@@ -931,6 +1085,38 @@ const Prescriptions: React.FC = () => {
   const [medicationDialogOpen, setMedicationDialogOpen] = useState(false);
   const [currentMedication, setCurrentMedication] = useState<Partial<Medication & { customName?: string }>>({});
   const [editingMedicationIndex, setEditingMedicationIndex] = useState<number | null>(null);
+  const [medicationSearchTerm, setMedicationSearchTerm] = useState('');
+
+  const filteredMedicationCatalog = useMemo(() => {
+    const term = medicationSearchTerm.trim().toLowerCase();
+    if (!term) {
+      return medicationCatalog;
+    }
+
+    return medicationCatalog.filter((item) => {
+      const haystack = `${item.name} ${item.dosage} ${item.frequency} ${item.category}`.toLowerCase();
+      return haystack.includes(term);
+    });
+  }, [medicationSearchTerm]);
+
+  const groupedMedicationCatalog = useMemo(() => {
+    return filteredMedicationCatalog.reduce<Record<string, MedicationCatalogItem[]>>((acc, item) => {
+      if (!acc[item.category]) {
+        acc[item.category] = [];
+      }
+      acc[item.category].push(item);
+      return acc;
+    }, {});
+  }, [filteredMedicationCatalog]);
+
+  const selectedMedicationCategory = useMemo(() => {
+    if (!currentMedication.name || currentMedication.name === 'outro') {
+      return 'Personalizado';
+    }
+
+    const found = medicationCatalog.find((item) => item.name === currentMedication.name);
+    return found?.category || 'Personalizado';
+  }, [currentMedication.name]);
 
   const handleClickOpen = () => {
     setCurrentPrescription({
@@ -991,11 +1177,13 @@ const Prescriptions: React.FC = () => {
       setCurrentMedication({});
       setEditingMedicationIndex(null);
     }
+    setMedicationSearchTerm('');
     setMedicationDialogOpen(true);
   };
 
   const handleCloseMedicationDialog = () => {
     setMedicationDialogOpen(false);
+    setMedicationSearchTerm('');
   };
 
   const handleSaveMedication = () => {
@@ -1133,7 +1321,7 @@ const Prescriptions: React.FC = () => {
         <DialogTitle>{isEditing ? 'Editar Prescrição' : 'Nova Prescrição'}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
+            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 4' } }}>
               <FormControl fullWidth>
                 <InputLabel id="patient-select-label">Paciente</InputLabel>
                 <Select
@@ -1153,7 +1341,7 @@ const Prescriptions: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
+            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 4' } }}>
               <EnhancedTextField
                 label="Data da Prescrição"
                 type="date"
@@ -1166,7 +1354,7 @@ const Prescriptions: React.FC = () => {
                 })}
               />
             </Grid>
-            <Grid sx={{ gridColumn: 'span 12' }}>
+            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 4' } }}>
               <EnhancedTextField
                 label="Válido até"
                 type="date"
@@ -1236,94 +1424,96 @@ const Prescriptions: React.FC = () => {
             </Grid>
             
             <Grid sx={{ gridColumn: 'span 12' }}>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                <Typography variant="subtitle1">
-                  Medicamentos Adicionados ({currentPrescription.medications?.length || 0})
-                </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<AddIcon />}
-                  onClick={() => handleOpenMedicationDialog()}
-                  size="small"
-                >
-                  Adicionar Medicamento
-                </Button>
-              </Box>
-              
-              {currentPrescription.medications && currentPrescription.medications.length > 0 ? (
-                currentPrescription.medications.map((medication, index) => (
-                  <Accordion key={index} sx={{ mb: 1 }}>
-                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                      <Box display="flex" alignItems="center" width="100%">
-                        <MedicationIcon sx={{ mr: 1, color: 'primary.main' }} />
-                        <Typography sx={{ flexGrow: 1 }}>
-                          {medication.name} - {medication.dosage}
-                        </Typography>
-                        <Box>
-                          <IconButton 
-                            size="small" 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenMedicationDialog(index);
-                            }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                          <IconButton 
-                            size="small" 
-                            color="error"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemoveMedication(index);
-                            }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="subtitle1">
+                    Medicamentos Adicionados ({currentPrescription.medications?.length || 0})
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => handleOpenMedicationDialog()}
+                    size="small"
+                  >
+                    Adicionar Medicamento
+                  </Button>
+                </Box>
+
+                {currentPrescription.medications && currentPrescription.medications.length > 0 ? (
+                  currentPrescription.medications.map((medication, index) => (
+                    <Accordion key={index} sx={{ mb: 1 }}>
+                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                        <Box display="flex" alignItems="center" width="100%">
+                          <MedicationIcon sx={{ mr: 1, color: 'primary.main' }} />
+                          <Typography sx={{ flexGrow: 1 }}>
+                            {medication.name} - {medication.dosage}
+                          </Typography>
+                          <Box>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenMedicationDialog(index);
+                              }}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveMedication(index);
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
                         </Box>
-                      </Box>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Grid container spacing={2}>
-                        <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
-                          <Typography variant="body2">
-                            <strong>Posologia:</strong> {medication.frequency}
-                          </Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Grid container spacing={2}>
+                          <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
+                            <Typography variant="body2">
+                              <strong>Posologia:</strong> {medication.frequency}
+                            </Typography>
+                          </Grid>
+                          <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
+                            <Typography variant="body2">
+                              <strong>Duração:</strong> {medication.duration}
+                            </Typography>
+                          </Grid>
+                          {medication.instructions && (
+                            <Grid sx={{ gridColumn: 'span 12' }}>
+                              <Typography variant="body2">
+                                <strong>Instruções:</strong> {medication.instructions}
+                              </Typography>
+                            </Grid>
+                          )}
+                          {medication.sideEffects && medication.sideEffects.length > 0 && (
+                            <Grid sx={{ gridColumn: 'span 12' }}>
+                              <Typography variant="body2">
+                                <strong>Efeitos Colaterais:</strong> {medication.sideEffects.join(', ')}
+                              </Typography>
+                            </Grid>
+                          )}
+                          {medication.contraindications && medication.contraindications.length > 0 && (
+                            <Grid sx={{ gridColumn: 'span 12' }}>
+                              <Typography variant="body2">
+                                <strong>Contraindicações:</strong> {medication.contraindications.join(', ')}
+                              </Typography>
+                            </Grid>
+                          )}
                         </Grid>
-                        <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
-                          <Typography variant="body2">
-                            <strong>Duração:</strong> {medication.duration}
-                          </Typography>
-                        </Grid>
-                        {medication.instructions && (
-                          <Grid sx={{ gridColumn: 'span 12' }}>
-                            <Typography variant="body2">
-                              <strong>Instruções:</strong> {medication.instructions}
-                            </Typography>
-                          </Grid>
-                        )}
-                        {medication.sideEffects && medication.sideEffects.length > 0 && (
-                          <Grid sx={{ gridColumn: 'span 12' }}>
-                            <Typography variant="body2">
-                              <strong>Efeitos Colaterais:</strong> {medication.sideEffects.join(', ')}
-                            </Typography>
-                          </Grid>
-                        )}
-                        {medication.contraindications && medication.contraindications.length > 0 && (
-                          <Grid sx={{ gridColumn: 'span 12' }}>
-                            <Typography variant="body2">
-                              <strong>Contraindicações:</strong> {medication.contraindications.join(', ')}
-                            </Typography>
-                          </Grid>
-                        )}
-                      </Grid>
-                    </AccordionDetails>
-                  </Accordion>
-                ))
-              ) : (
-                <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-                  Nenhum medicamento adicionado.
-                </Typography>
-              )}
+                      </AccordionDetails>
+                    </Accordion>
+                  ))
+                ) : (
+                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                    Nenhum medicamento adicionado.
+                  </Typography>
+                )}
+              </Paper>
             </Grid>
             
             <Grid sx={{ gridColumn: 'span 12' }}>
@@ -1386,7 +1576,18 @@ const Prescriptions: React.FC = () => {
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
+            <Grid sx={{ gridColumn: 'span 12' }}>
+              <EnhancedTextField
+                label="Buscar medicamento"
+                fullWidth
+                value={medicationSearchTerm}
+                onChange={(e) => setMedicationSearchTerm(e.target.value)}
+                helperText={`Resultados: ${filteredMedicationCatalog.length}`}
+                placeholder="Digite nome, categoria, dose ou frequência"
+              />
+            </Grid>
+
+            <Grid sx={{ gridColumn: 'span 12' }}>
               <FormControl fullWidth>
                 <InputLabel id="medication-select-label">Medicamento</InputLabel>
                 <Select
@@ -1411,11 +1612,25 @@ const Prescriptions: React.FC = () => {
                     autoComplete: 'new-password',
                   }}
                 >
-                  {mockMedications.map((med) => (
-                    <MenuItem key={med.id} value={med.name}>
-                      {med.name}
-                    </MenuItem>
-                  ))}
+                  {Object.entries(groupedMedicationCatalog).map(([category, meds]) => [
+                    <MenuItem
+                      key={`group-${category}`}
+                      value={category}
+                      disabled
+                      sx={{
+                        fontWeight: 'bold',
+                        backgroundColor: '#f5f5f5',
+                        color: 'primary.main',
+                      }}
+                    >
+                      {category}
+                    </MenuItem>,
+                    ...meds.map((med) => (
+                      <MenuItem key={med.id} value={med.name} sx={{ pl: 4 }}>
+                        {med.name} ({med.dosage})
+                      </MenuItem>
+                    )),
+                  ])}
                   <MenuItem value="outro">
                     <em>Outro medicamento...</em>
                   </MenuItem>
@@ -1423,9 +1638,13 @@ const Prescriptions: React.FC = () => {
                 <FormHelperText>Selecione um medicamento existente ou escolha "Outro medicamento"</FormHelperText>
               </FormControl>
             </Grid>
+
+            <Grid sx={{ gridColumn: 'span 12' }}>
+              <Chip size="small" label={`Categoria: ${selectedMedicationCategory}`} color="primary" variant="outlined" />
+            </Grid>
             
             {currentMedication.name === 'outro' && (
-              <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 6' } }}>
+              <Grid sx={{ gridColumn: 'span 12' }}>
                 <EnhancedTextField
                   label="Nome do Medicamento"
                   fullWidth

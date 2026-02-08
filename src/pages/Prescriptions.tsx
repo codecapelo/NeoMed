@@ -34,6 +34,7 @@ import {
   CircularProgress,
   ToggleButton,
   ToggleButtonGroup,
+  Autocomplete,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -1165,6 +1166,9 @@ const Prescriptions: React.FC = () => {
     const found = medicationCatalog.find((item) => item.name === currentMedication.name);
     return found?.category || 'Personalizado';
   }, [currentMedication.name]);
+  const patientOptions = useMemo(() => {
+    return [...patients].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+  }, [patients]);
 
   const canPersistPrescription = Boolean(
     currentPrescription.patientId && (currentPrescription.medications?.length || 0) > 0
@@ -1841,51 +1845,74 @@ const Prescriptions: React.FC = () => {
               </Grid>
             )}
 
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 4' } }}>
-              <FormControl fullWidth>
-                <InputLabel id="patient-select-label">Paciente</InputLabel>
-                <Select
-                  labelId="patient-select-label"
-                  value={currentPrescription.patientId || ''}
-                  label="Paciente"
+            <Grid sx={{ gridColumn: 'span 12' }}>
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' },
+                  gap: 2,
+                }}
+              >
+                <Autocomplete
+                  options={patientOptions}
+                  value={patientOptions.find((patient) => patient.id === currentPrescription.patientId) || null}
+                  onChange={(_, patient) =>
+                    setCurrentPrescription({
+                      ...currentPrescription,
+                      patientId: patient?.id || '',
+                    })
+                  }
+                  getOptionLabel={(option) => option.name || 'Paciente sem nome'}
+                  isOptionEqualToValue={(option, value) => option.id === value.id}
+                  noOptionsText={patients.length ? 'Nenhum paciente encontrado' : 'Nenhum paciente cadastrado'}
+                  openOnFocus
+                  autoHighlight
+                  renderOption={(props, option) => (
+                    <Box component="li" {...props}>
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {option.name}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {option.phone || option.email || 'Sem telefone/email'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Paciente"
+                      placeholder="Buscar paciente por nome"
+                      helperText="Clique e digite para filtrar pacientes"
+                    />
+                  )}
+                />
+
+                <EnhancedTextField
+                  label="Data da Prescrição"
+                  type="date"
+                  fullWidth
+                  InputLabelProps={{ shrink: true }}
+                  value={currentPrescription.date || ''}
                   onChange={(e) => setCurrentPrescription({
                     ...currentPrescription,
-                    patientId: e.target.value as string
+                    date: e.target.value
                   })}
-                >
-                  {patients.map((patient) => (
-                    <MenuItem key={patient.id} value={patient.id}>
-                      {patient.name}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 4' } }}>
-              <EnhancedTextField
-                label="Data da Prescrição"
-                type="date"
-                fullWidth
-                InputLabelProps={{ shrink: true }}
-                value={currentPrescription.date || ''}
-                onChange={(e) => setCurrentPrescription({
-                  ...currentPrescription,
-                  date: e.target.value
-                })}
-              />
-            </Grid>
-            <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 4' } }}>
-              <EnhancedTextField
-                label="Válido até"
-                type="date"
-                fullWidth
-                InputLabelProps={{ shrink: true }}
-                value={currentPrescription.validUntil || ''}
-                onChange={(e) => setCurrentPrescription({
-                  ...currentPrescription,
-                  validUntil: e.target.value
-                })}
-              />
+                />
+
+                <EnhancedTextField
+                  label="Válido até"
+                  type="date"
+                  fullWidth
+                  InputLabelProps={{ shrink: true }}
+                  value={currentPrescription.validUntil || ''}
+                  onChange={(e) => setCurrentPrescription({
+                    ...currentPrescription,
+                    validUntil: e.target.value
+                  })}
+                />
+              </Box>
             </Grid>
             
             {currentPrescription.patientId && (

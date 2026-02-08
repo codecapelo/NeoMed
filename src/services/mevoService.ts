@@ -43,6 +43,8 @@ export interface MevoSignatureSession {
   mode: 'provider' | 'mock';
   message: string;
   signatureId: string;
+  authUrl: string | null;
+  loginUrl: string | null;
   embedUrl: string | null;
   callbackUrl: string | null;
   createdAt: string;

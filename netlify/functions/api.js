@@ -335,21 +335,36 @@ const getMevoSignatureCallbackUrl = (provider) => {
   return process.env.MEVO_VIDDAS_CALLBACK_URL || process.env.MEVO_SIGNATURE_VIDDAS_CALLBACK_URL || '';
 };
 
+const getMevoSignatureAuthUrl = (provider) => {
+  if (provider === 'bird_id') {
+    return process.env.MEVO_BIRD_ID_AUTH_URL || process.env.MEVO_BIRD_ID_URL || '';
+  }
+
+  return process.env.MEVO_VIDDAS_AUTH_URL || process.env.MEVO_VIDDAS_URL || '';
+};
+
+const getMevoLoginUrl = () => process.env.MEVO_LOGIN_URL || '';
+
 const createMevoSignatureSession = ({ provider }) => {
+  const authUrl = getMevoSignatureAuthUrl(provider);
+  const loginUrl = getMevoLoginUrl();
   const embedUrl = getMevoSignatureEmbedUrl(provider) || process.env.MEVO_EMBED_URL || '';
   const callbackUrl = getMevoSignatureCallbackUrl(provider) || process.env.MEVO_SIGNATURE_CALLBACK_URL || '';
-  const mode = embedUrl ? 'provider' : 'mock';
+  const mode = authUrl || loginUrl || embedUrl ? 'provider' : 'mock';
+  const authenticated = mode === 'provider';
   const providerLabel = getMevoSignatureProviderLabel(provider);
 
   return {
     provider,
-    authenticated: true,
+    authenticated,
     mode,
     message:
       mode === 'provider'
         ? `Assinatura digital ${providerLabel} autenticada com sucesso.`
-        : `Sessão de assinatura ${providerLabel} criada em modo configuração (simulado).`,
+        : `Integração ${providerLabel} não configurada. Defina as URLs da Mevo, Bird ID e/ou Viddas.`,
     signatureId: `${provider}_${randomUUID()}`,
+    authUrl: authUrl || null,
+    loginUrl: loginUrl || null,
     embedUrl: embedUrl || null,
     callbackUrl: callbackUrl || null,
     createdAt: new Date().toISOString(),

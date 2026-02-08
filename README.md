@@ -26,6 +26,7 @@ Aplicação web para gestão clínica com:
 - `POST /api/saveAll`
 - `POST /api/integrations/mevo/emit`
 - `GET /api/integrations/mevo/documents`
+- `POST /api/integrations/mevo/signature/session`
 
 ## Desenvolvimento local
 
@@ -62,6 +63,18 @@ Mevo:
 - `MEVO_API_URL` (ou `MEVO_BASE_URL`)
 - `MEVO_ISSUE_PATH`
 - `MEVO_API_TOKEN` ou `MEVO_API_KEY` ou `MEVO_CLIENT_ID` + `MEVO_CLIENT_SECRET`
+- `MEVO_LOGIN_URL`
+- `MEVO_EMBED_URL`
+- `MEVO_BIRD_ID_AUTH_URL` (ou `MEVO_BIRD_ID_URL`)
+- `MEVO_VIDDAS_AUTH_URL` (ou `MEVO_VIDDAS_URL`)
+- `MEVO_BIRD_ID_EMBED_URL` e/ou `MEVO_VIDDAS_EMBED_URL`
+- `MEVO_BIRD_ID_CALLBACK_URL` e/ou `MEVO_VIDDAS_CALLBACK_URL`
+
+Frontend (`app_neomed/.env.local`):
+- `REACT_APP_MEVO_LOGIN_URL`
+- `REACT_APP_MEVO_EMBED_URL`
+- `REACT_APP_MEVO_BIRD_ID_URL`
+- `REACT_APP_MEVO_VIDDAS_URL`
 
 ## Observações
 

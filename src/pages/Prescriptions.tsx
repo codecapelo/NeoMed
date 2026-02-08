@@ -46,7 +46,8 @@ import {
   CalculateOutlined as CalculateIcon,
   Info as InfoIcon,
   CloudUpload as CloudUploadIcon,
-  FactCheck as FactCheckIcon
+  FactCheck as FactCheckIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { Prescription, Medication, Patient, MevoDocumentStatus } from '../types';
 import { EnhancedTextField, EnhancedTextArea } from '../components/common';
@@ -1056,6 +1057,18 @@ const Prescriptions: React.FC = () => {
     severity: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
+  const mevoLoginUrl = useMemo(
+    () => mevoSignatureSession?.loginUrl || process.env.REACT_APP_MEVO_LOGIN_URL || '',
+    [mevoSignatureSession?.loginUrl]
+  );
+  const mevoBirdIdUrl = useMemo(
+    () => process.env.REACT_APP_MEVO_BIRD_ID_URL || '',
+    []
+  );
+  const mevoViddasUrl = useMemo(
+    () => process.env.REACT_APP_MEVO_VIDDAS_URL || '',
+    []
+  );
   const mevoEmbedUrl = useMemo(() => {
     if (mevoSignatureSession?.embedUrl) {
       return mevoSignatureSession.embedUrl;
@@ -1297,6 +1310,10 @@ const Prescriptions: React.FC = () => {
     return provider === 'bird_id' ? 'Bird ID' : 'Viddas';
   };
 
+  const getProviderQuickLink = (provider: MevoSignatureProvider) => {
+    return provider === 'bird_id' ? mevoBirdIdUrl : mevoViddasUrl;
+  };
+
   const getMevoStatusLabel = (status: string) => {
     if (status === 'emitted') return 'Emitido';
     if (status === 'pending_configuration') return 'Configurar Mevo';
@@ -1411,16 +1428,22 @@ const Prescriptions: React.FC = () => {
     }
   };
 
-  const handleAuthenticateMevoSignature = async () => {
+  const handleAuthenticateMevoSignature = async (provider: MevoSignatureProvider) => {
     setIsAuthenticatingSignature(true);
     setMevoFeedback(null);
+    setSignatureProvider(provider);
 
     try {
-      const session = await createMevoSignatureSession(signatureProvider);
+      const session = await createMevoSignatureSession(provider);
       setMevoSignatureSession(session);
+      const quickLink = getProviderQuickLink(provider);
+      const authTarget = session.authUrl || quickLink;
+      if (authTarget) {
+        window.open(authTarget, '_blank', 'noopener,noreferrer');
+      }
 
       setMevoFeedback({
-        severity: session.authenticated ? 'success' : 'info',
+        severity: session.authenticated ? 'success' : 'error',
         message: session.message,
       });
     } catch (error) {
@@ -1559,8 +1582,8 @@ const Prescriptions: React.FC = () => {
                     </Alert>
                   ) : (
                     <Alert severity="info">
-                      Para emitir pela Mevo, autentique sua assinatura digital (Bird ID ou Viddas) e acesse a aba
-                      "Sistema Mevo".
+                      Para emitir pela Mevo, faça login, autentique Bird ID ou Viddas e use o bloco "Passo 2:
+                      Sistema Mevo".
                     </Alert>
                   )}
                 </Box>
@@ -1593,42 +1616,92 @@ const Prescriptions: React.FC = () => {
                       Passo 1: Assinatura digital
                     </Typography>
                     <Box display="flex" flexWrap="wrap" gap={1.5} alignItems="center">
-                      <FormControl sx={{ minWidth: 260 }} size="small">
-                        <InputLabel id="signature-provider-label">Provedor</InputLabel>
-                        <Select
-                          labelId="signature-provider-label"
-                          value={signatureProvider}
-                          label="Provedor"
-                          onChange={(event) => {
-                            setSignatureProvider(event.target.value as MevoSignatureProvider);
-                            setMevoSignatureSession(null);
-                          }}
-                        >
-                          <MenuItem value="bird_id">Bird ID</MenuItem>
-                          <MenuItem value="viddas">Viddas</MenuItem>
-                        </Select>
-                      </FormControl>
-
                       <Button
-                        onClick={handleAuthenticateMevoSignature}
+                        variant="outlined"
+                        startIcon={<OpenInNewIcon />}
+                        disabled={!mevoLoginUrl}
+                        onClick={() => {
+                          if (mevoLoginUrl) {
+                            window.open(mevoLoginUrl, '_blank', 'noopener,noreferrer');
+                          }
+                        }}
+                      >
+                        Entrar na Mevo
+                      </Button>
+                      <Button
+                        onClick={() => handleAuthenticateMevoSignature('bird_id')}
                         variant="contained"
                         color="primary"
                         disabled={isAuthenticatingSignature}
                         startIcon={isAuthenticatingSignature ? <CircularProgress size={16} /> : undefined}
                       >
-                        {isAuthenticatingSignature
-                          ? 'Autenticando...'
-                          : `Autenticar com ${getSignatureProviderLabel(signatureProvider)}`}
+                        {isAuthenticatingSignature && signatureProvider === 'bird_id'
+                          ? 'Autenticando Bird ID...'
+                          : 'Autenticar Bird ID'}
+                      </Button>
+                      <Button
+                        onClick={() => handleAuthenticateMevoSignature('viddas')}
+                        variant="contained"
+                        color="secondary"
+                        disabled={isAuthenticatingSignature}
+                        startIcon={isAuthenticatingSignature ? <CircularProgress size={16} /> : undefined}
+                      >
+                        {isAuthenticatingSignature && signatureProvider === 'viddas'
+                          ? 'Autenticando Viddas...'
+                          : 'Autenticar Viddas'}
                       </Button>
                     </Box>
 
+                    {(!mevoLoginUrl || !mevoBirdIdUrl || !mevoViddasUrl) && (
+                      <Alert severity="warning" sx={{ mt: 2 }}>
+                        Configure as URLs no frontend para habilitar acesso direto:
+                        `REACT_APP_MEVO_LOGIN_URL`, `REACT_APP_MEVO_BIRD_ID_URL`, `REACT_APP_MEVO_VIDDAS_URL`.
+                      </Alert>
+                    )}
+
+                    <Box display="flex" gap={1} mt={1.5} flexWrap="wrap">
+                      <Chip
+                        size="small"
+                        color={mevoLoginUrl ? 'success' : 'default'}
+                        label={`Login Mevo: ${mevoLoginUrl ? 'configurado' : 'não configurado'}`}
+                      />
+                      <Chip
+                        size="small"
+                        color={mevoBirdIdUrl ? 'success' : 'default'}
+                        label={`Bird ID: ${mevoBirdIdUrl ? 'configurado' : 'não configurado'}`}
+                      />
+                      <Chip
+                        size="small"
+                        color={mevoViddasUrl ? 'success' : 'default'}
+                        label={`Viddas: ${mevoViddasUrl ? 'configurado' : 'não configurado'}`}
+                      />
+                    </Box>
+
                     {mevoSignatureSession && (
-                      <Alert severity={mevoSignatureSession.authenticated ? 'success' : 'info'} sx={{ mt: 2 }}>
+                      <Alert severity={mevoSignatureSession.authenticated ? 'success' : 'warning'} sx={{ mt: 2 }}>
                         {mevoSignatureSession.message}
                         <Typography variant="body2" sx={{ mt: 0.5 }}>
                           Sessão: {mevoSignatureSession.signatureId}
                         </Typography>
+                        {!mevoSignatureSession.authenticated && (
+                          <Typography variant="body2">
+                            A autenticação real depende das URLs e credenciais configuradas no backend.
+                          </Typography>
+                        )}
                       </Alert>
+                    )}
+
+                    {mevoSignatureSession?.authUrl && (
+                      <Button
+                        component="a"
+                        href={mevoSignatureSession.authUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        sx={{ mt: 1 }}
+                        endIcon={<OpenInNewIcon />}
+                      >
+                        Abrir autenticação {getSignatureProviderLabel(mevoSignatureSession.provider)}
+                      </Button>
                     )}
                   </Box>
 

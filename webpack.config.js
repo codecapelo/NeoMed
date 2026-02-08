@@ -1,9 +1,16 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const webpack = require('webpack');
-const dotenv = require('dotenv');
 
-const env = dotenv.config().parsed || {};
+let dotenv = null;
+try {
+  // Optional in CI: if not available, build continues with process env only.
+  dotenv = require('dotenv');
+} catch (error) {
+  dotenv = null;
+}
+
+const env = dotenv ? dotenv.config().parsed || {} : {};
 
 const envKeys = Object.entries(env).reduce((prev, [key, value]) => {
   prev[`process.env.${key}`] = JSON.stringify(value);
@@ -22,7 +29,8 @@ module.exports = {
   output: {
     path: path.resolve(__dirname, 'build'),
     filename: process.env.NODE_ENV === 'production' ? '[name].[contenthash].js' : '[name].js',
-    chunkFilename: process.env.NODE_ENV === 'production' ? '[name].[contenthash].chunk.js' : '[name].chunk.js',
+    chunkFilename:
+      process.env.NODE_ENV === 'production' ? '[name].[contenthash].chunk.js' : '[name].chunk.js',
     publicPath: '/',
     clean: true,
   },

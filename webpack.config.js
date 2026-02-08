@@ -1,28 +1,36 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const CopyWebpackPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
 
 let dotenv = null;
 try {
-  // Optional in CI: if not available, build continues with process env only.
   dotenv = require('dotenv');
 } catch (error) {
   dotenv = null;
 }
 
-const env = dotenv ? dotenv.config().parsed || {} : {};
+const fileEnv = dotenv ? dotenv.config().parsed || {} : {};
 
-const envKeys = Object.entries(env).reduce((prev, [key, value]) => {
-  prev[`process.env.${key}`] = JSON.stringify(value);
-  return prev;
-}, {});
-
-const processEnv = Object.keys(process.env).reduce((prev, key) => {
+const reactEnvFromFile = Object.entries(fileEnv).reduce((acc, [key, value]) => {
   if (key.startsWith('REACT_APP_')) {
-    prev[`process.env.${key}`] = JSON.stringify(process.env[key]);
+    acc[key] = value;
   }
-  return prev;
+  return acc;
 }, {});
+
+const reactEnvFromProcess = Object.keys(process.env).reduce((acc, key) => {
+  if (key.startsWith('REACT_APP_')) {
+    acc[key] = process.env[key];
+  }
+  return acc;
+}, {});
+
+const clientEnv = {
+  NODE_ENV: process.env.NODE_ENV || 'production',
+  ...reactEnvFromFile,
+  ...reactEnvFromProcess,
+};
 
 module.exports = {
   entry: './src/index.tsx',
@@ -83,9 +91,18 @@ module.exports = {
       template: './public/index.html',
       favicon: './public/favicon.ico',
     }),
+    new CopyWebpackPlugin({
+      patterns: [
+        {
+          from: path.resolve(__dirname, 'public'),
+          globOptions: {
+            ignore: ['**/index.html', '**/favicon.ico'],
+          },
+        },
+      ],
+    }),
     new webpack.DefinePlugin({
-      ...envKeys,
-      ...processEnv,
+      'process.env': JSON.stringify(clientEnv),
     }),
   ],
   devServer: {

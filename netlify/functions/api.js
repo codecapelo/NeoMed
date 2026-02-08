@@ -2,6 +2,7 @@ const { randomUUID } = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const { issueDocumentWithMevo } = require('./providers/mevoClient');
 
 const DATA_TYPES = ['patients', 'prescriptions', 'appointments', 'medicalRecords'];
 
@@ -77,6 +78,32 @@ const ensureSchema = async () => {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           PRIMARY KEY (user_id, data_type)
         );
+
+        CREATE TABLE IF NOT EXISTS neomed_mevo_documents (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES neomed_users(id) ON DELETE CASCADE,
+          prescription_id TEXT NOT NULL,
+          patient_id TEXT,
+          document_type TEXT NOT NULL CHECK (document_type IN ('prescription', 'certificate')),
+          status TEXT NOT NULL,
+          provider_name TEXT NOT NULL DEFAULT 'mevo',
+          provider_document_id TEXT,
+          provider_token TEXT,
+          provider_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          raw_response JSONB,
+          error_message TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_neomed_mevo_user_prescription_type
+        ON neomed_mevo_documents (user_id, prescription_id, document_type);
+
+        CREATE INDEX IF NOT EXISTS idx_neomed_mevo_user_id
+        ON neomed_mevo_documents (user_id);
+
+        CREATE INDEX IF NOT EXISTS idx_neomed_mevo_prescription_id
+        ON neomed_mevo_documents (prescription_id);
       `)
       .catch((error) => {
         schemaReadyPromise = null;
@@ -287,6 +314,114 @@ const loadDataType = async (userId, dataType) => {
 };
 
 const isValidEmail = (email) => /\S+@\S+\.\S+/.test(email);
+const isValidMevoDocumentType = (documentType) => ['prescription', 'certificate'].includes(documentType);
+
+const sanitizeMevoDocument = (row) => ({
+  id: row.id,
+  userId: row.user_id,
+  prescriptionId: row.prescription_id,
+  patientId: row.patient_id || null,
+  documentType: row.document_type,
+  status: row.status,
+  providerName: row.provider_name,
+  providerDocumentId: row.provider_document_id || null,
+  providerToken: row.provider_token || null,
+  errorMessage: row.error_message || null,
+  providerPayload: row.provider_payload || {},
+  rawResponse: row.raw_response || null,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const upsertMevoDocument = async ({
+  userId,
+  prescriptionId,
+  patientId,
+  documentType,
+  status,
+  providerDocumentId,
+  providerToken,
+  providerPayload,
+  rawResponse,
+  errorMessage,
+}) => {
+  const db = getPool();
+  const documentId = randomUUID();
+  const result = await db.query(
+    `
+      INSERT INTO neomed_mevo_documents (
+        id,
+        user_id,
+        prescription_id,
+        patient_id,
+        document_type,
+        status,
+        provider_name,
+        provider_document_id,
+        provider_token,
+        provider_payload,
+        raw_response,
+        error_message,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'mevo', $7, $8, $9::jsonb, $10::jsonb, $11, NOW(), NOW())
+      ON CONFLICT (user_id, prescription_id, document_type)
+      DO UPDATE SET
+        status = EXCLUDED.status,
+        provider_document_id = EXCLUDED.provider_document_id,
+        provider_token = EXCLUDED.provider_token,
+        provider_payload = EXCLUDED.provider_payload,
+        raw_response = EXCLUDED.raw_response,
+        error_message = EXCLUDED.error_message,
+        updated_at = NOW()
+      RETURNING *;
+    `,
+    [
+      documentId,
+      userId,
+      prescriptionId,
+      patientId || null,
+      documentType,
+      status,
+      providerDocumentId || null,
+      providerToken || null,
+      JSON.stringify(providerPayload || {}),
+      JSON.stringify(rawResponse || null),
+      errorMessage || null,
+    ]
+  );
+
+  return result.rows[0];
+};
+
+const listMevoDocuments = async ({ userId, prescriptionId, documentType }) => {
+  const db = getPool();
+  const filters = ['user_id = $1'];
+  const values = [userId];
+
+  if (prescriptionId) {
+    filters.push(`prescription_id = $${values.length + 1}`);
+    values.push(prescriptionId);
+  }
+
+  if (documentType) {
+    filters.push(`document_type = $${values.length + 1}`);
+    values.push(documentType);
+  }
+
+  const result = await db.query(
+    `
+      SELECT *
+      FROM neomed_mevo_documents
+      WHERE ${filters.join(' AND ')}
+      ORDER BY updated_at DESC;
+    `,
+    values
+  );
+
+  return result.rows;
+};
 
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -452,6 +587,108 @@ exports.handler = async (event) => {
       return jsonResponse(200, {
         success: true,
         users: usersResult.rows.map(sanitizeUser),
+      });
+    }
+
+    if (method === 'POST' && path === '/integrations/mevo/emit') {
+      const authUser = await requireAuth(event);
+      const targetUserId = resolveTargetUserId(authUser, event, body);
+      const documentType = String(body.documentType || '').trim().toLowerCase();
+      const prescriptionId = String(body.prescriptionId || '').trim();
+      const patientId = body.patientId ? String(body.patientId).trim() : null;
+
+      if (!prescriptionId) {
+        throw appError(400, 'integration/mevo-invalid-payload', 'prescriptionId is required.');
+      }
+
+      if (!isValidMevoDocumentType(documentType)) {
+        throw appError(
+          400,
+          'integration/mevo-invalid-document-type',
+          'documentType must be "prescription" or "certificate".'
+        );
+      }
+
+      const providerPayload = {
+        documentType,
+        prescriptionId,
+        patientId,
+        prescription: body.prescription || null,
+        patient: body.patient || null,
+        issuedBy: {
+          id: authUser.id,
+          email: authUser.email,
+          name: authUser.name,
+        },
+      };
+
+      try {
+        const providerResult = await issueDocumentWithMevo(providerPayload);
+        const savedDocument = await upsertMevoDocument({
+          userId: targetUserId,
+          prescriptionId,
+          patientId,
+          documentType,
+          status: providerResult.status || 'processing',
+          providerDocumentId: providerResult.providerDocumentId,
+          providerToken: providerResult.providerToken,
+          providerPayload,
+          rawResponse: providerResult.rawResponse,
+          errorMessage: null,
+        });
+
+        return jsonResponse(200, {
+          success: true,
+          mode: providerResult.mode || 'provider',
+          document: sanitizeMevoDocument(savedDocument),
+        });
+      } catch (integrationError) {
+        const savedDocument = await upsertMevoDocument({
+          userId: targetUserId,
+          prescriptionId,
+          patientId,
+          documentType,
+          status: 'failed',
+          providerDocumentId: null,
+          providerToken: null,
+          providerPayload,
+          rawResponse: integrationError.providerResponse || null,
+          errorMessage: integrationError.message || 'Failed to send document to Mevo.',
+        });
+
+        return jsonResponse(502, {
+          success: false,
+          code: integrationError.code || 'integration/mevo-provider-error',
+          message: integrationError.message || 'Failed to send document to Mevo.',
+          document: sanitizeMevoDocument(savedDocument),
+        });
+      }
+    }
+
+    if (method === 'GET' && path === '/integrations/mevo/documents') {
+      const authUser = await requireAuth(event);
+      const targetUserId = resolveTargetUserId(authUser, event, body);
+      const query = event.queryStringParameters || {};
+      const prescriptionId = query.prescriptionId ? String(query.prescriptionId).trim() : null;
+      const documentType = query.documentType ? String(query.documentType).trim().toLowerCase() : null;
+
+      if (documentType && !isValidMevoDocumentType(documentType)) {
+        throw appError(
+          400,
+          'integration/mevo-invalid-document-type',
+          'documentType must be "prescription" or "certificate".'
+        );
+      }
+
+      const documents = await listMevoDocuments({
+        userId: targetUserId,
+        prescriptionId,
+        documentType,
+      });
+
+      return jsonResponse(200, {
+        success: true,
+        documents: documents.map(sanitizeMevoDocument),
       });
     }
 

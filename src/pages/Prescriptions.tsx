@@ -30,7 +30,8 @@ import {
   InputLabel,
   FormHelperText,
   Tooltip,
-  Alert
+  Alert,
+  CircularProgress
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -41,12 +42,15 @@ import {
   Medication as MedicationIcon,
   Send as SendIcon,
   CalculateOutlined as CalculateIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  CloudUpload as CloudUploadIcon,
+  FactCheck as FactCheckIcon
 } from '@mui/icons-material';
-import { Prescription, Medication, Patient } from '../types';
+import { Prescription, Medication, Patient, MevoDocumentStatus } from '../types';
 import { EnhancedTextField, EnhancedTextArea } from '../components/common';
 import '../styles/PrescriptionPrint.css';
 import usePersistentState from '../hooks/usePersistentState';
+import { emitMevoDocument, MevoDocumentType } from '../services/mevoService';
 
 // Dados mockados para exemplo
 const mockPatients: Patient[] = [
@@ -1086,6 +1090,11 @@ const Prescriptions: React.FC = () => {
   const [currentMedication, setCurrentMedication] = useState<Partial<Medication & { customName?: string }>>({});
   const [editingMedicationIndex, setEditingMedicationIndex] = useState<number | null>(null);
   const [medicationSearchTerm, setMedicationSearchTerm] = useState('');
+  const [mevoSubmittingType, setMevoSubmittingType] = useState<MevoDocumentType | null>(null);
+  const [mevoFeedback, setMevoFeedback] = useState<{
+    severity: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
 
   const filteredMedicationCatalog = useMemo(() => {
     const term = medicationSearchTerm.trim().toLowerCase();
@@ -1118,18 +1127,24 @@ const Prescriptions: React.FC = () => {
     return found?.category || 'Personalizado';
   }, [currentMedication.name]);
 
+  const canPersistPrescription = Boolean(
+    currentPrescription.patientId && (currentPrescription.medications?.length || 0) > 0
+  );
+
   const handleClickOpen = () => {
     setCurrentPrescription({
       date: new Date().toISOString().split('T')[0],
       medications: []
     });
     setIsEditing(false);
+    setMevoFeedback(null);
     setOpen(true);
   };
 
   const handleEdit = (prescription: Prescription) => {
     setCurrentPrescription({ ...prescription });
     setIsEditing(true);
+    setMevoFeedback(null);
     setOpen(true);
   };
 
@@ -1137,27 +1152,70 @@ const Prescriptions: React.FC = () => {
     setOpen(false);
   };
 
-  const handleSave = () => {
-    if (!currentPrescription.patientId || currentPrescription.medications?.length === 0) {
+  const persistCurrentPrescription = (): Prescription | null => {
+    if (!canPersistPrescription) {
       alert('Por favor, selecione um paciente e adicione pelo menos um medicamento.');
+      return null;
+    }
+
+    let persisted: Prescription;
+
+    if (isEditing) {
+      persisted = { ...(currentPrescription as Prescription) };
+      setPrescriptions(
+        prescriptions.map((prescription) => (prescription.id === persisted.id ? { ...persisted } : prescription))
+      );
+    } else {
+      persisted = {
+        ...(currentPrescription as Prescription),
+        id: `${Date.now()}`,
+        date: currentPrescription.date || new Date().toISOString().split('T')[0],
+        validUntil:
+          currentPrescription.validUntil ||
+          new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
+      };
+      setPrescriptions([...prescriptions, persisted]);
+      setIsEditing(true);
+    }
+
+    setCurrentPrescription(persisted);
+    return persisted;
+  };
+
+  const mergeMevoStatusInPrescription = (
+    prescription: Prescription,
+    statusUpdate: MevoDocumentStatus
+  ): Prescription => {
+    const currentStatuses = prescription.mevoDocuments || [];
+    const hasStatus = currentStatuses.some((item) => item.documentType === statusUpdate.documentType);
+    const nextStatuses = hasStatus
+      ? currentStatuses.map((item) => (item.documentType === statusUpdate.documentType ? statusUpdate : item))
+      : [...currentStatuses, statusUpdate];
+
+    return {
+      ...prescription,
+      mevoDocuments: nextStatuses,
+    };
+  };
+
+  const persistMevoStatus = (prescriptionId: string, statusUpdate: MevoDocumentStatus) => {
+    setPrescriptions((prev) =>
+      prev.map((item) => (item.id === prescriptionId ? mergeMevoStatusInPrescription(item, statusUpdate) : item))
+    );
+    setCurrentPrescription((prev) => {
+      if (!prev?.id || prev.id !== prescriptionId) {
+        return prev;
+      }
+      return mergeMevoStatusInPrescription(prev as Prescription, statusUpdate);
+    });
+  };
+
+  const handleSave = () => {
+    const persisted = persistCurrentPrescription();
+    if (!persisted) {
       return;
     }
 
-    if (isEditing) {
-      // Atualizar prescrição existente
-      setPrescriptions(prescriptions.map(prescription => 
-        prescription.id === currentPrescription.id ? { ...currentPrescription as Prescription } : prescription
-      ));
-    } else {
-      // Adicionar nova prescrição
-      const newPrescription: Prescription = {
-        ...(currentPrescription as Prescription),
-        id: `${prescriptions.length + 1}`, // Em produção, usar UUID ou ID do backend
-        date: currentPrescription.date || new Date().toISOString().split('T')[0],
-        validUntil: currentPrescription.validUntil || new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0]
-      };
-      setPrescriptions([...prescriptions, newPrescription]);
-    }
     setOpen(false);
   };
 
@@ -1237,6 +1295,26 @@ const Prescriptions: React.FC = () => {
     return mockPatients.find(p => p.id === patientId);
   };
 
+  const getDocumentTypeLabel = (documentType: MevoDocumentType) => {
+    return documentType === 'certificate' ? 'Atestado' : 'Receita';
+  };
+
+  const getMevoStatusLabel = (status: string) => {
+    if (status === 'emitted') return 'Emitido';
+    if (status === 'pending_configuration') return 'Configurar Mevo';
+    if (status === 'failed') return 'Falha';
+    if (status === 'processing') return 'Processando';
+    return status;
+  };
+
+  const getMevoStatusColor = (status: string): 'success' | 'warning' | 'error' | 'info' | 'default' => {
+    if (status === 'emitted') return 'success';
+    if (status === 'pending_configuration') return 'warning';
+    if (status === 'failed') return 'error';
+    if (status === 'processing') return 'info';
+    return 'default';
+  };
+
   // Função para adicionar medicação proveniente do cálculo de dose
   const handleAddCalculatedMedication = (calculatedMedication: Partial<Medication>) => {
     const updatedMedications = [...(currentPrescription.medications || [])];
@@ -1246,6 +1324,59 @@ const Prescriptions: React.FC = () => {
       ...currentPrescription,
       medications: updatedMedications
     });
+  };
+
+  const handleEmitWithMevo = async (documentType: MevoDocumentType) => {
+    const persisted = persistCurrentPrescription();
+    if (!persisted) {
+      return;
+    }
+
+    setMevoFeedback(null);
+    setMevoSubmittingType(documentType);
+
+    const patient = getPatientDetails(persisted.patientId);
+
+    try {
+      const response = await emitMevoDocument({
+        documentType,
+        prescriptionId: persisted.id,
+        patientId: persisted.patientId,
+        prescription: persisted,
+        patient: patient || undefined,
+      });
+
+      if (!response.document) {
+        throw new Error('A integração Mevo não retornou dados do documento.');
+      }
+
+      const statusUpdate: MevoDocumentStatus = {
+        documentType,
+        status: response.document.status,
+        providerName: response.document.providerName,
+        providerDocumentId: response.document.providerDocumentId,
+        providerToken: response.document.providerToken,
+        errorMessage: response.document.errorMessage,
+        updatedAt: response.document.updatedAt,
+      };
+      persistMevoStatus(persisted.id, statusUpdate);
+
+      const modeLabel = response.mode === 'mock' ? 'modo configuração' : 'modo produção';
+      setMevoFeedback({
+        severity: statusUpdate.status === 'emitted' ? 'success' : 'info',
+        message: `${getDocumentTypeLabel(documentType)} enviada para Mevo (${modeLabel}). Status: ${getMevoStatusLabel(
+          statusUpdate.status
+        )}.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro ao emitir documento na Mevo.';
+      setMevoFeedback({
+        severity: 'error',
+        message,
+      });
+    } finally {
+      setMevoSubmittingType(null);
+    }
   };
 
   return (
@@ -1296,13 +1427,28 @@ const Prescriptions: React.FC = () => {
                     {prescription.validUntil ? new Date(prescription.validUntil).toLocaleDateString('pt-BR') : '-'}
                   </TableCell>
                   <TableCell>
-                    <IconButton color="primary" onClick={() => handleEdit(prescription)}>
-                      <EditIcon />
-                    </IconButton>
-                    <PrintButton prescription={prescription} />
-                    <IconButton color="error" onClick={() => handleDelete(prescription.id)}>
-                      <DeleteIcon />
-                    </IconButton>
+                    <Box display="flex" alignItems="center" flexWrap="wrap">
+                      <IconButton color="primary" onClick={() => handleEdit(prescription)}>
+                        <EditIcon />
+                      </IconButton>
+                      <PrintButton prescription={prescription} />
+                      <IconButton color="error" onClick={() => handleDelete(prescription.id)}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </Box>
+                    <Box display="flex" gap={0.5} flexWrap="wrap" mt={0.5}>
+                      {(prescription.mevoDocuments || []).map((doc) => (
+                        <Chip
+                          key={`${prescription.id}-${doc.documentType}`}
+                          size="small"
+                          color={getMevoStatusColor(doc.status)}
+                          variant="outlined"
+                          label={`${doc.documentType === 'certificate' ? 'Atestado' : 'Receita'} Mevo: ${getMevoStatusLabel(
+                            doc.status
+                          )}`}
+                        />
+                      ))}
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))}
@@ -1321,6 +1467,41 @@ const Prescriptions: React.FC = () => {
         <DialogTitle>{isEditing ? 'Editar Prescrição' : 'Nova Prescrição'}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid sx={{ gridColumn: 'span 12' }}>
+              <Alert severity="info">
+                Integração Mevo pronta: use os botões "Emitir Receita Mevo" e "Emitir Atestado Mevo" ao final do formulário.
+              </Alert>
+            </Grid>
+
+            {mevoFeedback && (
+              <Grid sx={{ gridColumn: 'span 12' }}>
+                <Alert severity={mevoFeedback.severity}>{mevoFeedback.message}</Alert>
+              </Grid>
+            )}
+
+            {!!currentPrescription.mevoDocuments?.length && (
+              <Grid sx={{ gridColumn: 'span 12' }}>
+                <Paper variant="outlined" sx={{ p: 1.5 }}>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    Status Mevo desta prescrição
+                  </Typography>
+                  <Box display="flex" gap={1} flexWrap="wrap">
+                    {currentPrescription.mevoDocuments.map((doc) => (
+                      <Chip
+                        key={`draft-${doc.documentType}`}
+                        size="small"
+                        color={getMevoStatusColor(doc.status)}
+                        variant="outlined"
+                        label={`${doc.documentType === 'certificate' ? 'Atestado' : 'Receita'}: ${getMevoStatusLabel(
+                          doc.status
+                        )}`}
+                      />
+                    ))}
+                  </Box>
+                </Paper>
+              </Grid>
+            )}
+
             <Grid sx={{ gridColumn: { xs: 'span 12', sm: 'span 4' } }}>
               <FormControl fullWidth>
                 <InputLabel id="patient-select-label">Paciente</InputLabel>
@@ -1553,11 +1734,29 @@ const Prescriptions: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClose}>Cancelar</Button>
-          <Button 
-            onClick={handleSave} 
-            variant="contained" 
+          <Button
+            onClick={() => handleEmitWithMevo('prescription')}
+            variant="outlined"
+            color="primary"
+            startIcon={mevoSubmittingType === 'prescription' ? <CircularProgress size={16} /> : <CloudUploadIcon />}
+            disabled={!canPersistPrescription || !!mevoSubmittingType}
+          >
+            Emitir Receita Mevo
+          </Button>
+          <Button
+            onClick={() => handleEmitWithMevo('certificate')}
+            variant="outlined"
+            color="secondary"
+            startIcon={mevoSubmittingType === 'certificate' ? <CircularProgress size={16} /> : <FactCheckIcon />}
+            disabled={!canPersistPrescription || !!mevoSubmittingType}
+          >
+            Emitir Atestado Mevo
+          </Button>
+          <Button
+            onClick={handleSave}
+            variant="contained"
             startIcon={<SendIcon />}
-            disabled={!currentPrescription.patientId || !currentPrescription.medications?.length}
+            disabled={!canPersistPrescription || !!mevoSubmittingType}
           >
             {isEditing ? 'Atualizar' : 'Emitir Prescrição'}
           </Button>

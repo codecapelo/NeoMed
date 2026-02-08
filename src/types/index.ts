@@ -33,6 +33,17 @@ export interface Prescription {
   instructions?: string;
   doctorNotes?: string;
   validUntil?: string;
+  mevoDocuments?: MevoDocumentStatus[];
+}
+
+export interface MevoDocumentStatus {
+  documentType: 'prescription' | 'certificate';
+  status: string;
+  providerName?: string;
+  providerDocumentId?: string | null;
+  providerToken?: string | null;
+  errorMessage?: string | null;
+  updatedAt?: string;
 }
 
 export interface Medication {

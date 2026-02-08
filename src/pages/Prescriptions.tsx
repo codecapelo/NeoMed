@@ -1722,19 +1722,29 @@ const Prescriptions: React.FC = () => {
                       </Alert>
                     )}
                     {mevoEmbedUrl ? (
-                      <Box
-                        component="iframe"
-                        src={mevoEmbedUrl}
-                        title="Sistema Mevo"
-                        sx={{
-                          width: '100%',
-                          minHeight: 420,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          bgcolor: 'common.white',
-                        }}
-                      />
+                      <>
+                        <Button
+                          variant="outlined"
+                          startIcon={<OpenInNewIcon />}
+                          onClick={() => window.open(mevoEmbedUrl, '_blank', 'noopener,noreferrer')}
+                          sx={{ mb: 1.5 }}
+                        >
+                          Abrir Sistema Mevo em nova aba
+                        </Button>
+                        <Box
+                          component="iframe"
+                          src={mevoEmbedUrl}
+                          title="Sistema Mevo"
+                          sx={{
+                            width: '100%',
+                            minHeight: 420,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            borderRadius: 1,
+                            bgcolor: 'common.white',
+                          }}
+                        />
+                      </>
                     ) : (
                       <Alert severity="info">
                         URL do portal Mevo não configurada. Defina `REACT_APP_MEVO_EMBED_URL` para exibir o portal.

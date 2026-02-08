@@ -15,6 +15,12 @@ const CORS_HEADERS = {
 const JWT_SECRET = process.env.JWT_SECRET || process.env.NETLIFY_JWT_SECRET || 'change-this-secret-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const ONLINE_WINDOW_SECONDS = 120;
+const DEFAULT_MEVO_LOGIN_URL = 'https://receita.mevosaude.com.br';
+const DEFAULT_MEVO_EMBED_URL = 'https://receita.mevosaude.com.br';
+const DEFAULT_MEVO_BIRD_ID_AUTH_URL =
+  'https://birdid-certificadodigital.com.br/?utm_source=birdid&utm_medium=birdid&utm_campaign=birdid&gad_source=1&gad_campaignid=22504060543&gbraid=0AAAAA_fzDabxDstFCrUKb_wWSc7srKVow&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D4V4-EsbBH8bPgzzA49IcrviU-ZDzyjmvcrSoIDca2_OIK2Yj7Zv2EaAmEuEALw_wcB';
+const DEFAULT_MEVO_VIDDAS_AUTH_URL =
+  'https://validcertificadora.com.br/pages/certificado-em-nuvem/d36toyotas503341?utm_source=google&utm_medium=cpc&utm_campaign=%5BSearch%5D+%5BBrasil%5D+Certificado+Digital&utm_content=Certificado+Digital&utm_term=b_&gad_source=1&gad_campaignid=22325218706&gbraid=0AAAAADleBNm7VmqWk6O20qYtaRltq0XF_&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D6it02PqENrLEPIoHiQsf5dij4kI8-GWeB6sEWFrsTDJFh_BKlKxUYaAteLEALw_wcB';
 
 let pool;
 let schemaReadyPromise;
@@ -321,10 +327,10 @@ const getMevoSignatureProviderLabel = (provider) => (provider === 'bird_id' ? 'B
 
 const getMevoSignatureEmbedUrl = (provider) => {
   if (provider === 'bird_id') {
-    return process.env.MEVO_BIRD_ID_EMBED_URL || process.env.MEVO_SIGNATURE_BIRD_ID_EMBED_URL || '';
+    return process.env.MEVO_BIRD_ID_EMBED_URL || process.env.MEVO_SIGNATURE_BIRD_ID_EMBED_URL || DEFAULT_MEVO_EMBED_URL;
   }
 
-  return process.env.MEVO_VIDDAS_EMBED_URL || process.env.MEVO_SIGNATURE_VIDDAS_EMBED_URL || '';
+  return process.env.MEVO_VIDDAS_EMBED_URL || process.env.MEVO_SIGNATURE_VIDDAS_EMBED_URL || DEFAULT_MEVO_EMBED_URL;
 };
 
 const getMevoSignatureCallbackUrl = (provider) => {
@@ -337,13 +343,13 @@ const getMevoSignatureCallbackUrl = (provider) => {
 
 const getMevoSignatureAuthUrl = (provider) => {
   if (provider === 'bird_id') {
-    return process.env.MEVO_BIRD_ID_AUTH_URL || process.env.MEVO_BIRD_ID_URL || '';
+    return process.env.MEVO_BIRD_ID_AUTH_URL || process.env.MEVO_BIRD_ID_URL || DEFAULT_MEVO_BIRD_ID_AUTH_URL;
   }
 
-  return process.env.MEVO_VIDDAS_AUTH_URL || process.env.MEVO_VIDDAS_URL || '';
+  return process.env.MEVO_VIDDAS_AUTH_URL || process.env.MEVO_VIDDAS_URL || DEFAULT_MEVO_VIDDAS_AUTH_URL;
 };
 
-const getMevoLoginUrl = () => process.env.MEVO_LOGIN_URL || '';
+const getMevoLoginUrl = () => process.env.MEVO_LOGIN_URL || DEFAULT_MEVO_LOGIN_URL;
 
 const createMevoSignatureSession = ({ provider }) => {
   const authUrl = getMevoSignatureAuthUrl(provider);

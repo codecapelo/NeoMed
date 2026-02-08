@@ -5,6 +5,8 @@ export interface AuthUser {
   photoURL: string | null;
   role?: string;
   createdAt?: string;
+  lastSeenAt?: string | null;
+  isOnline?: boolean;
 }
 
 interface AuthResponse {
@@ -169,6 +171,36 @@ export const refreshCurrentUser = async (): Promise<AuthUser | null> => {
   const payload = await response.json();
   if (!payload?.user) {
     clearSession();
+    return null;
+  }
+
+  localStorage.setItem(AUTH_USER_KEY, JSON.stringify(payload.user));
+  return payload.user as AuthUser;
+};
+
+export const pingSession = async (): Promise<AuthUser | null> => {
+  const token = getAuthToken();
+
+  if (!token) {
+    return null;
+  }
+
+  const response = await fetch(`${getApiBase()}/api/auth/ping`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      clearSession();
+    }
+    return null;
+  }
+
+  const payload = await response.json();
+  if (!payload?.user) {
     return null;
   }
 

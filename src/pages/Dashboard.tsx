@@ -1,5 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Button, Chip, Paper, Stack, Typography } from '@mui/material';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  Paper,
+  Stack,
+  Typography,
+} from '@mui/material';
 import {
   ArrowForward as ArrowForwardIcon,
   CalendarMonth as AppointmentMUIcon,
@@ -19,47 +36,110 @@ import PrescriptionIcon from '../assets/icons/prescription.svg';
 import MedicalRecordIcon from '../assets/icons/medical-record.svg';
 import '../styles/Dashboard.css';
 
+interface RegisteredUser {
+  uid: string;
+  email: string | null;
+  role?: string;
+  isOnline?: boolean;
+  lastSeenAt?: string | null;
+}
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const { patients, appointments, prescriptions, medicalRecords } = useData();
   const [registeredUsersCount, setRegisteredUsersCount] = useState<number | null>(null);
+  const [usersDialogOpen, setUsersDialogOpen] = useState(false);
+  const [registeredUsers, setRegisteredUsers] = useState<RegisteredUser[]>([]);
+  const [isUsersListLoading, setIsUsersListLoading] = useState(false);
+  const [usersListError, setUsersListError] = useState<string | null>(null);
 
   const isAdmin = !!currentUser && typeof currentUser === 'object' && currentUser.role === 'admin';
 
-  useEffect(() => {
-    const loadUsersCount = async () => {
-      if (!isAdmin) {
-        setRegisteredUsersCount(null);
-        return;
+  const loadUsersCount = useCallback(async () => {
+    if (!isAdmin) {
+      setRegisteredUsersCount(null);
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      setRegisteredUsersCount(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/admin/users/count`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Nao foi possivel carregar contagem de usuarios.');
       }
 
-      const token = getAuthToken();
-      if (!token) {
-        setRegisteredUsersCount(null);
-        return;
-      }
-
-      try {
-        const response = await fetch(`${getApiBaseUrl()}/api/admin/users/count`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error('Nao foi possivel carregar contagem de usuarios.');
-        }
-
-        const payload = await response.json();
-        setRegisteredUsersCount(typeof payload.count === 'number' ? payload.count : null);
-      } catch {
-        setRegisteredUsersCount(null);
-      }
-    };
-
-    loadUsersCount();
+      const payload = await response.json();
+      setRegisteredUsersCount(typeof payload.count === 'number' ? payload.count : null);
+    } catch {
+      setRegisteredUsersCount(null);
+    }
   }, [isAdmin]);
+
+  const loadRegisteredUsers = useCallback(async () => {
+    if (!isAdmin) {
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      setUsersListError('Sessao invalida. Faca login novamente.');
+      setRegisteredUsers([]);
+      return;
+    }
+
+    setIsUsersListLoading(true);
+    setUsersListError(null);
+
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/admin/users`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Nao foi possivel carregar a lista de usuarios.');
+      }
+
+      const payload = await response.json();
+      const users = Array.isArray(payload.users) ? (payload.users as RegisteredUser[]) : [];
+      setRegisteredUsers(users);
+      setRegisteredUsersCount(users.length);
+    } catch {
+      setUsersListError('Erro ao carregar usuarios.');
+      setRegisteredUsers([]);
+    } finally {
+      setIsUsersListLoading(false);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    loadUsersCount();
+  }, [loadUsersCount]);
+
+  useEffect(() => {
+    if (!usersDialogOpen || !isAdmin) {
+      return;
+    }
+
+    loadRegisteredUsers();
+    const intervalId = window.setInterval(loadRegisteredUsers, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isAdmin, loadRegisteredUsers, usersDialogOpen]);
 
   const userName = useMemo(() => {
     if (!currentUser || typeof currentUser !== 'object') {
@@ -78,6 +158,26 @@ const Dashboard: React.FC = () => {
   }, [currentUser]);
 
   const totalRegistros = patients.length + appointments.length + prescriptions.length + medicalRecords.length;
+  const onlineUsersCount = useMemo(
+    () => registeredUsers.filter((user) => Boolean(user.isOnline)).length,
+    [registeredUsers]
+  );
+
+  const formatLastSeen = useCallback((lastSeenAt?: string | null) => {
+    if (!lastSeenAt) {
+      return 'sem atividade recente';
+    }
+
+    const date = new Date(lastSeenAt);
+    if (Number.isNaN(date.getTime())) {
+      return 'sem atividade recente';
+    }
+
+    return new Intl.DateTimeFormat('pt-BR', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    }).format(date);
+  }, []);
 
   const cards = useMemo(
     () => [
@@ -168,10 +268,16 @@ const Dashboard: React.FC = () => {
                 <Chip
                   icon={<GroupsIcon fontSize="small" />}
                   label={`Usuarios cadastrados: ${registeredUsersCount ?? '...'}`}
+                  clickable
+                  onClick={() => setUsersDialogOpen(true)}
                   sx={{
                     backgroundColor: '#3949ab1a',
                     color: '#3949ab',
                     fontWeight: 600,
+                    cursor: 'pointer',
+                    '&:hover': {
+                      backgroundColor: '#3949ab26',
+                    },
                   }}
                 />
               )}
@@ -191,6 +297,63 @@ const Dashboard: React.FC = () => {
           </Box>
         </Stack>
       </Paper>
+
+      <Dialog open={usersDialogOpen} onClose={() => setUsersDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>Usuarios cadastrados</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1}>
+            <Typography variant="body2" color="text.secondary">
+              Total: {registeredUsers.length} | Online agora: {onlineUsersCount}
+            </Typography>
+            <Divider />
+            {isUsersListLoading && (
+              <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                <CircularProgress size={26} />
+              </Box>
+            )}
+            {!isUsersListLoading && usersListError && <Alert severity="error">{usersListError}</Alert>}
+            {!isUsersListLoading && !usersListError && (
+              <List disablePadding>
+                {registeredUsers.map((user) => (
+                  <ListItem
+                    key={user.uid}
+                    disablePadding
+                    sx={{
+                      py: 1.1,
+                      borderBottom: '1px solid',
+                      borderColor: 'divider',
+                    }}
+                    secondaryAction={
+                      <Chip
+                        size="small"
+                        label={user.isOnline ? 'Online' : 'Offline'}
+                        color={user.isOnline ? 'success' : 'default'}
+                        variant={user.isOnline ? 'filled' : 'outlined'}
+                      />
+                    }
+                  >
+                    <ListItemText
+                      primary={user.email || 'sem email'}
+                      secondary={`Perfil: ${user.role || 'usuario'} | Ultima atividade: ${formatLastSeen(user.lastSeenAt)}`}
+                    />
+                  </ListItem>
+                ))}
+                {registeredUsers.length === 0 && (
+                  <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
+                    Nenhum usuario cadastrado.
+                  </Typography>
+                )}
+              </List>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={loadRegisteredUsers}>Atualizar</Button>
+          <Button onClick={() => setUsersDialogOpen(false)} variant="contained">
+            Fechar
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <div className="dashboard-cards">
         {cards.map((card) => (

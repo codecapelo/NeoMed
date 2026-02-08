@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 
 const DATA_TYPES = ['patients', 'prescriptions', 'appointments', 'medicalRecords'];
-const USER_ROLES = ['admin', 'doctor', 'nurse', 'receptionist'];
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -14,6 +13,7 @@ const CORS_HEADERS = {
 
 const JWT_SECRET = process.env.JWT_SECRET || process.env.NETLIFY_JWT_SECRET || 'change-this-secret-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const ONLINE_WINDOW_SECONDS = 120;
 
 let pool;
 let schemaReadyPromise;
@@ -63,8 +63,12 @@ const ensureSchema = async () => {
           password_hash TEXT NOT NULL,
           name TEXT NOT NULL,
           role TEXT NOT NULL CHECK (role IN ('admin', 'doctor', 'nurse', 'receptionist')),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_seen_at TIMESTAMPTZ
         );
+
+        ALTER TABLE neomed_users
+        ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
         CREATE TABLE IF NOT EXISTS neomed_user_data (
           user_id TEXT NOT NULL REFERENCES neomed_users(id) ON DELETE CASCADE,
@@ -124,6 +128,8 @@ const sanitizeUser = (user) => ({
   displayName: user.name,
   role: user.role,
   createdAt: user.created_at,
+  lastSeenAt: user.last_seen_at || null,
+  isOnline: typeof user.is_online === 'boolean' ? user.is_online : false,
   photoURL: null,
 });
 
@@ -164,6 +170,21 @@ const signToken = (user) =>
     }
   );
 
+const markUserSeen = async (userId) => {
+  const db = getPool();
+  const result = await db.query(
+    `
+      UPDATE neomed_users
+      SET last_seen_at = NOW()
+      WHERE id = $1
+      RETURNING id, email, name, role, created_at, last_seen_at;
+    `,
+    [userId]
+  );
+
+  return result.rows[0] || null;
+};
+
 const requireAuth = async (event) => {
   const token = getTokenFromEvent(event);
   if (!token) {
@@ -179,7 +200,7 @@ const requireAuth = async (event) => {
 
   const db = getPool();
   const userResult = await db.query(
-    `SELECT id, email, name, role, created_at FROM neomed_users WHERE id = $1 LIMIT 1;`,
+    `SELECT id, email, name, role, created_at, last_seen_at FROM neomed_users WHERE id = $1 LIMIT 1;`,
     [decoded.sub]
   );
 
@@ -314,9 +335,9 @@ exports.handler = async (event) => {
 
       const insertResult = await db.query(
         `
-          INSERT INTO neomed_users (id, email, password_hash, name, role)
-          VALUES ($1, $2, $3, $4, $5)
-          RETURNING id, email, name, role, created_at;
+          INSERT INTO neomed_users (id, email, password_hash, name, role, last_seen_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())
+          RETURNING id, email, name, role, created_at, last_seen_at;
         `,
         [id, email, passwordHash, displayName || email.split('@')[0], role]
       );
@@ -341,7 +362,7 @@ exports.handler = async (event) => {
 
       const userResult = await db.query(
         `
-          SELECT id, email, name, role, created_at, password_hash
+          SELECT id, email, name, role, created_at, password_hash, last_seen_at
           FROM neomed_users
           WHERE email = $1
           LIMIT 1;
@@ -359,20 +380,32 @@ exports.handler = async (event) => {
         throw appError(401, 'auth/invalid-credentials', 'Invalid email or password.');
       }
 
+      const seenUser = await markUserSeen(user.id);
       const token = signToken(user);
 
       return jsonResponse(200, {
         success: true,
-        user: sanitizeUser(user),
+        user: sanitizeUser(seenUser || user),
         token,
       });
     }
 
     if (method === 'GET' && path === '/auth/me') {
       const authUser = await requireAuth(event);
+      const seenUser = await markUserSeen(authUser.id);
       return jsonResponse(200, {
         success: true,
-        user: sanitizeUser(authUser),
+        user: sanitizeUser(seenUser || authUser),
+      });
+    }
+
+    if (method === 'POST' && path === '/auth/ping') {
+      const authUser = await requireAuth(event);
+      const seenUser = await markUserSeen(authUser.id);
+      return jsonResponse(200, {
+        success: true,
+        user: sanitizeUser(seenUser || authUser),
+        serverTime: new Date().toISOString(),
       });
     }
 
@@ -403,7 +436,14 @@ exports.handler = async (event) => {
 
       const usersResult = await db.query(
         `
-          SELECT id, email, name, role, created_at
+          SELECT
+            id,
+            email,
+            name,
+            role,
+            created_at,
+            last_seen_at,
+            (COALESCE(last_seen_at, '1970-01-01'::timestamptz) >= NOW() - INTERVAL '${ONLINE_WINDOW_SECONDS} seconds') AS is_online
           FROM neomed_users
           ORDER BY created_at DESC;
         `

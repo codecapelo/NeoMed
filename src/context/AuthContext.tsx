@@ -52,6 +52,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
     bootstrapAuth();
   }, []);
 
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pingSession = async () => {
+      try {
+        const refreshedUser = await authService.pingSession();
+        if (!cancelled && refreshedUser) {
+          setCurrentUser(refreshedUser);
+        }
+      } catch {
+        // Silent failure to avoid interrupting the current session UI.
+      }
+    };
+
+    const intervalId = window.setInterval(pingSession, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [currentUser?.uid]);
+
   async function signInWithGoogle() {
     try {
       setError(null);

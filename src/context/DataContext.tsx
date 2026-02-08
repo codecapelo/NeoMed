@@ -52,10 +52,13 @@ interface Appointment {
 interface MedicalRecord {
   id: string;
   patientId: string;
-  date: string;
-  diagnosis: string;
-  treatment: string;
+  date?: string;
+  diagnosis?: string;
+  treatment?: string;
   notes?: string;
+  consultations?: any[];
+  createdAt?: string;
+  updatedAt?: string;
   [key: string]: any;
 }
 

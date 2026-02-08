@@ -74,13 +74,44 @@ export interface Medication {
 export interface MedicalRecord {
   id: string;
   patientId: string;
-  date: string;
-  symptoms: string;
-  diagnosis: string;
+  date?: string;
+  symptoms?: string;
+  diagnosis?: string;
   icd11Code?: string;
-  treatment: string;
+  treatment?: string;
   notes?: string;
   attachments?: string[];
+  consultations?: MedicalConsultation[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MedicalConsultation {
+  id: string;
+  date: string;
+  subjective?: string;
+  objective?: string;
+  assessment?: string;
+  plan?: string;
+  vitals?: {
+    bloodPressure?: string;
+    heartRate?: string;
+    temperature?: string;
+    respiratoryRate?: string;
+    oxygenSaturation?: string;
+    weight?: string;
+    height?: string;
+  };
+  examTexts?: string[];
+  examAttachments?: MedicalExamAttachment[];
+}
+
+export interface MedicalExamAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  dataUrl: string;
+  uploadedAt: string;
 }
 
 export interface Appointment {

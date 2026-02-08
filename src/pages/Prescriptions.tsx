@@ -49,40 +49,8 @@ import {
 import { Prescription, Medication, Patient, MevoDocumentStatus } from '../types';
 import { EnhancedTextField, EnhancedTextArea } from '../components/common';
 import '../styles/PrescriptionPrint.css';
-import usePersistentState from '../hooks/usePersistentState';
 import { emitMevoDocument, MevoDocumentType } from '../services/mevoService';
-
-// Dados mockados para exemplo
-const mockPatients: Patient[] = [
-  {
-    id: '1',
-    name: 'João Silva',
-    dateOfBirth: '1985-05-15',
-    gender: 'male',
-    email: 'joao.silva@email.com',
-    phone: '(11) 99999-8888',
-    address: 'Rua das Flores, 123 - São Paulo, SP',
-    healthInsurance: 'Unimed',
-    medicalHistory: 'Hipertensão',
-    allergies: ['Penicilina', 'Látex'],
-    medications: ['Losartana 50mg'],
-    cid10Code: 'I10',
-    cid10Description: 'Hipertensão essencial (primária)'
-  },
-  {
-    id: '2',
-    name: 'Maria Oliveira',
-    dateOfBirth: '1990-10-20',
-    gender: 'female',
-    email: 'maria.oliveira@email.com',
-    phone: '(11) 98888-7777',
-    address: 'Av. Paulista, 1578 - São Paulo, SP',
-    healthInsurance: 'Bradesco Saúde',
-    allergies: ['Dipirona'],
-    cid10Code: 'E11',
-    cid10Description: 'Diabetes mellitus não-insulino-dependente'
-  }
-];
+import { useData } from '../context/DataContext';
 
 interface MedicationCatalogItem extends Medication {
   category: string;
@@ -291,33 +259,6 @@ const medicationCatalog: MedicationCatalogItem[] = [
 ];
 
 const mockMedications: Medication[] = medicationCatalog.map(({ category, ...medication }) => medication);
-
-// Dados mockados de prescrições para exemplo
-const mockPrescriptions: Prescription[] = [
-  {
-    id: '1',
-    patientId: '1',
-    date: '2025-04-01',
-    medications: [
-      { ...mockMedications[0], id: '1' },
-      { ...mockMedications[2], id: '3' }
-    ],
-    instructions: 'Manter dieta hipossódica',
-    doctorNotes: 'Paciente com pressão controlada',
-    validUntil: '2025-05-01'
-  },
-  {
-    id: '2',
-    patientId: '2',
-    date: '2025-04-02',
-    medications: [
-      { ...mockMedications[1], id: '2' }
-    ],
-    instructions: 'Manter dieta restrita em carboidratos',
-    doctorNotes: 'Glicemia descompensada',
-    validUntil: '2025-05-02'
-  }
-];
 
 // Tipos para cálculo de dose pediátrica
 interface MedicamentoPipo {
@@ -868,9 +809,8 @@ const CalculoDosePediatrica: React.FC<{
 
 // Componente para visualização/impressão da prescrição
 const PrescriptionView: React.FC<{ prescription: Prescription }> = ({ prescription }) => {
-  const getPatientDetails = (patientId: string): Patient | undefined => {
-    return mockPatients.find(patient => patient.id === patientId);
-  };
+  const { patients } = useData();
+  const getPatientDetails = (patientId: string) => patients.find((patient) => patient.id === patientId);
 
   const patient = getPatientDetails(prescription.patientId);
   
@@ -1082,7 +1022,14 @@ const PrintButton: React.FC<{ prescription: Prescription }> = ({ prescription })
 };
 
 const Prescriptions: React.FC = () => {
-  const [prescriptions, setPrescriptions] = usePersistentState<Prescription[]>('prescriptions', mockPrescriptions);
+  const {
+    patients,
+    prescriptions: contextPrescriptions,
+    addPrescription,
+    updatePrescription,
+    deletePrescription,
+  } = useData();
+  const prescriptions = useMemo(() => contextPrescriptions as Prescription[], [contextPrescriptions]);
   const [open, setOpen] = useState(false);
   const [currentPrescription, setCurrentPrescription] = useState<Partial<Prescription>>({});
   const [isEditing, setIsEditing] = useState(false);
@@ -1162,9 +1109,7 @@ const Prescriptions: React.FC = () => {
 
     if (isEditing) {
       persisted = { ...(currentPrescription as Prescription) };
-      setPrescriptions(
-        prescriptions.map((prescription) => (prescription.id === persisted.id ? { ...persisted } : prescription))
-      );
+      updatePrescription(persisted.id, persisted);
     } else {
       persisted = {
         ...(currentPrescription as Prescription),
@@ -1174,7 +1119,7 @@ const Prescriptions: React.FC = () => {
           currentPrescription.validUntil ||
           new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString().split('T')[0],
       };
-      setPrescriptions([...prescriptions, persisted]);
+      addPrescription(persisted);
       setIsEditing(true);
     }
 
@@ -1199,14 +1144,19 @@ const Prescriptions: React.FC = () => {
   };
 
   const persistMevoStatus = (prescriptionId: string, statusUpdate: MevoDocumentStatus) => {
-    setPrescriptions((prev) =>
-      prev.map((item) => (item.id === prescriptionId ? mergeMevoStatusInPrescription(item, statusUpdate) : item))
-    );
+    const found = prescriptions.find((item) => item.id === prescriptionId);
+    if (!found) {
+      return;
+    }
+
+    const merged = mergeMevoStatusInPrescription(found, statusUpdate);
+    updatePrescription(prescriptionId, merged);
+
     setCurrentPrescription((prev) => {
       if (!prev?.id || prev.id !== prescriptionId) {
         return prev;
       }
-      return mergeMevoStatusInPrescription(prev as Prescription, statusUpdate);
+      return merged;
     });
   };
 
@@ -1221,7 +1171,7 @@ const Prescriptions: React.FC = () => {
 
   const handleDelete = (id: string) => {
     if (window.confirm('Tem certeza que deseja remover esta prescrição?')) {
-      setPrescriptions(prescriptions.filter(prescription => prescription.id !== id));
+      deletePrescription(id);
     }
   };
 
@@ -1287,12 +1237,12 @@ const Prescriptions: React.FC = () => {
   };
 
   const getPatientName = (patientId: string) => {
-    const patient = mockPatients.find(p => p.id === patientId);
+    const patient = patients.find((p) => p.id === patientId);
     return patient ? patient.name : '-';
   };
 
   const getPatientDetails = (patientId: string) => {
-    return mockPatients.find(p => p.id === patientId);
+    return patients.find((p) => p.id === patientId);
   };
 
   const getDocumentTypeLabel = (documentType: MevoDocumentType) => {
@@ -1336,6 +1286,24 @@ const Prescriptions: React.FC = () => {
     setMevoSubmittingType(documentType);
 
     const patient = getPatientDetails(persisted.patientId);
+    const mappedPatient: Partial<Patient> | undefined = patient
+      ? {
+          id: patient.id,
+          name: patient.name || '',
+          dateOfBirth: patient.dateOfBirth || patient.birthDate || '',
+          gender: (patient.gender as Patient['gender']) || 'other',
+          email: patient.email || '',
+          phone: patient.phone || '',
+          address: patient.address || '',
+          healthInsurance: patient.healthInsurance,
+          bloodType: patient.bloodType,
+          medicalHistory: patient.medicalHistory,
+          allergies: patient.allergies,
+          medications: patient.medications,
+          cid10Code: patient.cid10Code,
+          cid10Description: patient.cid10Description,
+        }
+      : undefined;
 
     try {
       const response = await emitMevoDocument({
@@ -1343,7 +1311,7 @@ const Prescriptions: React.FC = () => {
         prescriptionId: persisted.id,
         patientId: persisted.patientId,
         prescription: persisted,
-        patient: patient || undefined,
+        patient: mappedPatient,
       });
 
       if (!response.document) {
@@ -1514,7 +1482,7 @@ const Prescriptions: React.FC = () => {
                     patientId: e.target.value as string
                   })}
                 >
-                  {mockPatients.map((patient) => (
+                  {patients.map((patient) => (
                     <MenuItem key={patient.id} value={patient.id}>
                       {patient.name}
                     </MenuItem>
@@ -1564,7 +1532,10 @@ const Prescriptions: React.FC = () => {
                             <strong>Nome:</strong> {patient.name}
                           </Typography>
                           <Typography variant="body2">
-                            <strong>Data de Nascimento:</strong> {new Date(patient.dateOfBirth).toLocaleDateString('pt-BR')}
+                            <strong>Data de Nascimento:</strong>{' '}
+                            {patient.dateOfBirth || patient.birthDate
+                              ? new Date(patient.dateOfBirth || patient.birthDate).toLocaleDateString('pt-BR')
+                              : '-'}
                           </Typography>
                           {patient.cid10Code && (
                             <Typography variant="body2">

@@ -24,11 +24,17 @@ interface Patient {
 interface Prescription {
   id: string;
   patientId: string;
-  medication: string;
-  dosage: string;
-  frequency: string;
-  startDate: string;
-  endDate: string;
+  date?: string;
+  medications?: any[];
+  instructions?: string;
+  doctorNotes?: string;
+  validUntil?: string;
+  mevoDocuments?: any[];
+  medication?: string;
+  dosage?: string;
+  frequency?: string;
+  startDate?: string;
+  endDate?: string;
   observations?: string;
   [key: string]: any;
 }
@@ -38,7 +44,7 @@ interface Appointment {
   patientId: string;
   date: string;
   time: string;
-  status: 'scheduled' | 'completed' | 'cancelled';
+  status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled';
   notes?: string;
   [key: string]: any;
 }
@@ -61,7 +67,7 @@ interface DataContextType {
   getPatient: (id: string) => Patient | undefined;
 
   prescriptions: Prescription[];
-  addPrescription: (prescription: Omit<Prescription, 'id'>) => void;
+  addPrescription: (prescription: Omit<Prescription, 'id'> & { id?: string }) => void;
   updatePrescription: (id: string, prescription: Partial<Prescription>) => void;
   deletePrescription: (id: string) => void;
   getPatientPrescriptions: (patientId: string) => Prescription[];
@@ -77,6 +83,13 @@ interface DataContextType {
   updateMedicalRecord: (id: string, record: Partial<MedicalRecord>) => void;
   deleteMedicalRecord: (id: string) => void;
   getPatientMedicalRecords: (patientId: string) => MedicalRecord[];
+  replaceAllData: (data: {
+    patients?: Patient[];
+    prescriptions?: Prescription[];
+    appointments?: Appointment[];
+    medicalRecords?: MedicalRecord[];
+  }) => void;
+  clearAllData: () => void;
 }
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -249,10 +262,10 @@ export function DataProvider({ children }: DataProviderProps) {
   );
 
   const addPrescription = useCallback(
-    (prescriptionData: Omit<Prescription, 'id'>) => {
+    (prescriptionData: Omit<Prescription, 'id'> & { id?: string }) => {
       const newPrescription = {
         ...prescriptionData,
-        id: generateId(),
+        id: prescriptionData.id || generateId(),
       } as Prescription;
       setPrescriptions((prev) => [...prev, newPrescription]);
     },
@@ -348,6 +361,28 @@ export function DataProvider({ children }: DataProviderProps) {
     [medicalRecords]
   );
 
+  const replaceAllData = useCallback(
+    (data: {
+      patients?: Patient[];
+      prescriptions?: Prescription[];
+      appointments?: Appointment[];
+      medicalRecords?: MedicalRecord[];
+    }) => {
+      setPatients(Array.isArray(data.patients) ? data.patients : []);
+      setPrescriptions(Array.isArray(data.prescriptions) ? data.prescriptions : []);
+      setAppointments(Array.isArray(data.appointments) ? data.appointments : []);
+      setMedicalRecords(Array.isArray(data.medicalRecords) ? data.medicalRecords : []);
+    },
+    [setAppointments, setMedicalRecords, setPatients, setPrescriptions]
+  );
+
+  const clearAllData = useCallback(() => {
+    setPatients([]);
+    setPrescriptions([]);
+    setAppointments([]);
+    setMedicalRecords([]);
+  }, [setAppointments, setMedicalRecords, setPatients, setPrescriptions]);
+
   const value = useMemo(
     () => ({
       patients,
@@ -370,6 +405,8 @@ export function DataProvider({ children }: DataProviderProps) {
       updateMedicalRecord,
       deleteMedicalRecord,
       getPatientMedicalRecords,
+      replaceAllData,
+      clearAllData,
     }),
     [
       addAppointment,
@@ -377,6 +414,7 @@ export function DataProvider({ children }: DataProviderProps) {
       addPatient,
       addPrescription,
       appointments,
+      clearAllData,
       deleteAppointment,
       deleteMedicalRecord,
       deletePatient,
@@ -388,6 +426,7 @@ export function DataProvider({ children }: DataProviderProps) {
       medicalRecords,
       patients,
       prescriptions,
+      replaceAllData,
       updateAppointment,
       updateMedicalRecord,
       updatePatient,

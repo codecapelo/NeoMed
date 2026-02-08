@@ -48,7 +48,7 @@ interface AppointmentData {
   patientId: string;
   date: string;
   time: string;
-  status: 'scheduled' | 'completed' | 'cancelled';
+  status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled';
   notes?: string;
   patientName?: string;
 }
@@ -206,7 +206,7 @@ const AppointmentsPage: React.FC = () => {
         patientId: currentAppointment.patientId,
         date: currentAppointment.date,
         time: currentAppointment.time,
-        status: currentAppointment.status as 'scheduled' | 'completed' | 'cancelled',
+        status: currentAppointment.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled',
         notes: currentAppointment.notes
       });
     } else {
@@ -215,7 +215,7 @@ const AppointmentsPage: React.FC = () => {
         patientId: currentAppointment.patientId as string,
         date: currentAppointment.date as string,
         time: currentAppointment.time as string,
-        status: currentAppointment.status as 'scheduled' | 'completed' | 'cancelled',
+        status: currentAppointment.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled',
         notes: currentAppointment.notes
       });
     }
@@ -272,6 +272,7 @@ const AppointmentsPage: React.FC = () => {
   const getStatusChip = (status: AppointmentData['status']) => {
     const statusConfig = {
       scheduled: { label: 'Agendado', color: 'primary' as const },
+      confirmed: { label: 'Confirmado', color: 'info' as const },
       completed: { label: 'Concluído', color: 'success' as const },
       cancelled: { label: 'Cancelado', color: 'error' as const }
     };
@@ -504,6 +505,7 @@ const AppointmentsPage: React.FC = () => {
                   })}
                 >
                   <MenuItem value="scheduled">Agendado</MenuItem>
+                  <MenuItem value="confirmed">Confirmado</MenuItem>
                   <MenuItem value="completed">Concluído</MenuItem>
                   <MenuItem value="cancelled">Cancelado</MenuItem>
                 </Select>

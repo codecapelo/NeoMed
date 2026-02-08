@@ -1,6 +1,7 @@
--- Script SQL para Criação do Banco de Dados do NeoMed
--- Este script cria todas as tabelas necessárias para o aplicativo NeoMed
--- incluindo tabelas para pacientes, medicamentos, prescrições e cálculos de dose pediátrica
+-- LEGADO: Script histórico de modelagem antiga (MySQL).
+-- Não representa o schema atual de produção.
+-- O schema ativo é criado automaticamente pela API em:
+-- netlify/functions/api.js
 
 -- Criação do banco de dados
 CREATE DATABASE IF NOT EXISTS neomed_db;

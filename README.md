@@ -1,99 +1,69 @@
-# NeoMed - Sistema de Gestão Médica
+# NeoMed
 
-Sistema completo para gerenciamento de prescrições, prontuários médicos, receitas e acompanhamento de pacientes com integração CID-11 e sugestões de condutas terapêuticas baseadas em diretrizes americanas e brasileiras.
+Aplicação web para gestão clínica com:
+- autenticação por email/senha
+- gestão de pacientes, prontuários, prescrições e agendamentos
+- sincronização local + servidor
+- integração Mevo (com modo mock quando não configurada)
 
-## Funcionalidades
+## Arquitetura Atual
 
-### Cadastro e Gerenciamento de Pacientes
-- Registro detalhado de dados pessoais e histórico clínico
-- Integração com CID-11 para classificação da condição clínica
-- Sugestões automáticas de condutas terapêuticas
+- Frontend: React + TypeScript + MUI (`src/`)
+- Backend produção: Netlify Function (`netlify/functions/api.js`) com PostgreSQL
+- Backend local: Express (`../server.js`) compatível com as mesmas rotas principais
+- Persistência no cliente: `localStorage` com chave por usuário (`neomed_<uid>_<tipo>`)
 
-### Registro e Atualização de Prontuários
-- Armazenamento seguro de históricos médicos
-- Visualização e edição de registros com histórico
+## Rotas principais da API
 
-### Emissão e Gerenciamento de Receitas Médicas
-- Aba dedicada para seleção de medicamentos
-- Definição de dosagem, posologia e instruções
-- Montagem de prescrição completa
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/ping`
+- `POST /api/auth/logout`
+- `GET /api/admin/users/count` (admin)
+- `GET /api/admin/users` (admin)
+- `GET /api/all`
+- `POST /api/saveAll`
+- `POST /api/integrations/mevo/emit`
+- `GET /api/integrations/mevo/documents`
 
-### Acompanhamento de Pacientes
-- Agendamento de consultas e lembretes
-- Monitoramento de tratamentos com notificações
+## Desenvolvimento local
 
-### Atualização Dinâmica de Conteúdo
-- Importação de arquivos para atualização do banco de dados
-- Manutenção contínua de medicações e diretrizes
+### 1) API local
+Na raiz do projeto (`app_NeoMed`):
 
-## Tecnologias Utilizadas
-
-- **Frontend**: React.js, TypeScript, Material UI
-- **Gerenciamento de Estado**: React Hooks, Context API
-- **Roteamento**: React Router
-- **Validação**: Formik, Yup
-- **Requisições HTTP**: Axios, React Query
-
-## Começando
-
-### Pré-requisitos
-
-- Node.js (versão 14 ou superior)
-- npm ou yarn
-
-### Instalação
-
-1. Clone o repositório
 ```bash
-git clone https://github.com/seu-usuario/neomed.git
-cd neomed
+node server.js
 ```
 
-2. Instale as dependências
+API disponível em `http://localhost:3001`.
+
+### 2) Frontend
+Na pasta `app_neomed`:
+
 ```bash
 npm install
-```
-
-3. Execute o projeto em modo de desenvolvimento
-```bash
 npm start
 ```
 
-A aplicação estará disponível em `http://localhost:3000`.
+Frontend disponível em `http://localhost:3000`.
 
-## Estrutura do Projeto
+Se necessário, configure:
+- `REACT_APP_API_BASE=http://localhost:3001`
 
-```
-neomed/
-├── public/
-├── src/
-│   ├── components/
-│   │   ├── common/
-│   │   ├── patients/
-│   │   ├── prescriptions/
-│   │   └── medical-records/
-│   ├── pages/
-│   ├── context/
-│   ├── services/
-│   ├── hooks/
-│   ├── types/
-│   └── utils/
-├── package.json
-└── README.md
-```
+## Variáveis de ambiente (produção)
 
-## Contribuindo
+Backend (Netlify Function):
+- `NETLIFY_DATABASE_URL` (ou `NETLIFY_DATABASE_URL_UNPOOLED`/`DATABASE_URL`)
+- `JWT_SECRET` (ou `NETLIFY_JWT_SECRET`)
+- `JWT_EXPIRES_IN`
 
-1. Faça um fork do projeto
-2. Crie sua branch de feature (`git checkout -b feature/nome-da-feature`)
-3. Commit suas alterações (`git commit -m 'Adiciona feature xyz'`)
-4. Push para a branch (`git push origin feature/nome-da-feature`)
-5. Abra um Pull Request
+Mevo:
+- `MEVO_API_URL` (ou `MEVO_BASE_URL`)
+- `MEVO_ISSUE_PATH`
+- `MEVO_API_TOKEN` ou `MEVO_API_KEY` ou `MEVO_CLIENT_ID` + `MEVO_CLIENT_SECRET`
 
-## Licença
+## Observações
 
-Este projeto está licenciado sob a Licença MIT - veja o arquivo LICENSE para detalhes.
-
-## Contato
-
-Equipe NeoMed - contato@neomed.med.br
+- O schema do banco em produção é criado automaticamente pela função `api.js`.
+- O arquivo `docs/neomed_database.sql` é referência histórica e não representa mais o schema ativo de produção.

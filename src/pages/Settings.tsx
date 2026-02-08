@@ -15,7 +15,6 @@ import {
   CardContent,
   CardHeader,
   IconButton,
-  InputAdornment,
   Select,
   MenuItem,
   FormControl,
@@ -40,9 +39,7 @@ import {
   CloudDownload as CloudDownloadIcon,
   Delete as DeleteIcon,
   ColorLens as ThemeIcon,
-  Notifications as NotificationsIcon,
   Security as SecurityIcon,
-  Language as LanguageIcon,
   Print as PrintIcon,
   Assessment as ReportIcon,
   Storage as StorageIcon,
@@ -52,7 +49,9 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import usePersistentState from '../hooks/usePersistentState';
-import { storageService } from '../services/storageService';
+import { exportUserData, getStorageSize } from '../services/storageService';
+import { useData } from '../context/DataContext';
+import { getApiBaseUrl, getAuthHeaders, getAuthToken } from '../services/authService';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -134,6 +133,7 @@ const fontSizeOptions = [
 
 const Settings: React.FC = () => {
   const { currentUser } = useAuth();
+  const { patients, prescriptions, appointments, medicalRecords, replaceAllData, clearAllData } = useData();
   const navigate = useNavigate();
   const [tabValue, setTabValue] = useState(0);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
@@ -145,11 +145,10 @@ const Settings: React.FC = () => {
   
   // Usamos um hook personalizado para manter as configurações persistentes
   const [settings, setSettings] = usePersistentState<UserSettings>(
-    `userSettings_${currentUser?.uid || 'default'}`,
+    'userSettings',
     defaultSettings
   );
 
-  // Para simular estatísticas de armazenamento 
   const [storageStats, setStorageStats] = useState({
     totalPatients: 0,
     totalPrescriptions: 0,
@@ -164,40 +163,17 @@ const Settings: React.FC = () => {
       return;
     }
 
-    // Simulação de carregamento de estatísticas de armazenamento
-    const loadStorageStats = () => {
-      const patientsStr = localStorage.getItem(`${currentUser.uid}_patients`);
-      const prescriptionsStr = localStorage.getItem(`${currentUser.uid}_prescriptions`);
-      const appointmentsStr = localStorage.getItem(`${currentUser.uid}_appointments`);
-      const medicalRecordsStr = localStorage.getItem(`${currentUser.uid}_medicalRecords`);
+    const bytes = getStorageSize(currentUser.uid);
+    const sizeInMB = (bytes / (1024 * 1024)).toFixed(2);
 
-      const patients = patientsStr ? JSON.parse(patientsStr) : [];
-      const prescriptions = prescriptionsStr ? JSON.parse(prescriptionsStr) : [];
-      const appointments = appointmentsStr ? JSON.parse(appointmentsStr) : [];
-      const medicalRecords = medicalRecordsStr ? JSON.parse(medicalRecordsStr) : [];
-
-      // Estimativa de tamanho em bytes
-      const totalSize = (
-        (patientsStr?.length || 0) +
-        (prescriptionsStr?.length || 0) +
-        (appointmentsStr?.length || 0) +
-        (medicalRecordsStr?.length || 0)
-      ) * 2; // Multiplicado por 2 para considerar codificação Unicode
-
-      // Converter para MB
-      const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
-
-      setStorageStats({
-        totalPatients: patients.length,
-        totalPrescriptions: prescriptions.length,
-        totalAppointments: appointments.length,
-        totalMedicalRecords: medicalRecords.length,
-        estimatedSize: `${sizeInMB} MB`
-      });
-    };
-
-    loadStorageStats();
-  }, [currentUser, navigate]);
+    setStorageStats({
+      totalPatients: patients.length,
+      totalPrescriptions: prescriptions.length,
+      totalAppointments: appointments.length,
+      totalMedicalRecords: medicalRecords.length,
+      estimatedSize: `${sizeInMB} MB`,
+    });
+  }, [appointments.length, currentUser, medicalRecords.length, navigate, patients.length, prescriptions.length]);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -224,30 +200,9 @@ const Settings: React.FC = () => {
     showConfirmDialog(
       'ATENÇÃO: Esta ação irá excluir permanentemente todos os seus dados. Esta ação não pode ser desfeita. Deseja continuar?',
       () => {
-        if (currentUser) {
-          // Lista de chaves a serem removidas
-          const keysToRemove = [
-            `${currentUser.uid}_patients`,
-            `${currentUser.uid}_prescriptions`,
-            `${currentUser.uid}_appointments`,
-            `${currentUser.uid}_medicalRecords`,
-            `${currentUser.uid}_userSettings`
-          ];
-
-          // Remove cada item do localStorage
-          keysToRemove.forEach(key => localStorage.removeItem(key));
-          
-          // Atualiza as estatísticas
-          setStorageStats({
-            totalPatients: 0,
-            totalPrescriptions: 0,
-            totalAppointments: 0,
-            totalMedicalRecords: 0,
-            estimatedSize: '0 MB'
-          });
-
-          showSnackbar('Todos os dados foram excluídos com sucesso', 'success');
-        }
+        clearAllData();
+        setSettings(defaultSettings);
+        showSnackbar('Todos os dados foram excluídos com sucesso', 'success');
       }
     );
   };
@@ -259,8 +214,11 @@ const Settings: React.FC = () => {
         return;
       }
 
-      // Obtém todas as chaves de armazenamento para este usuário
-      const allData = storageService.getAllUserData(currentUser.uid);
+      const serializedData = await exportUserData(currentUser.uid);
+      const allData = {
+        ...JSON.parse(serializedData),
+        userSettings: settings,
+      };
       
       // Criar um blob com os dados para download
       const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
@@ -302,17 +260,26 @@ const Settings: React.FC = () => {
         showConfirmDialog(
           'Esta ação irá substituir seus dados atuais pelos dados importados. Deseja continuar?',
           async () => {
-            if (currentUser) {
-              // Para cada conjunto de dados no arquivo importado
-              Object.entries(importedData).forEach(([key, value]) => {
-                localStorage.setItem(`${currentUser.uid}_${key}`, JSON.stringify(value));
-              });
-              
-              // Recarregar a página para atualizar os dados
-              window.location.reload();
-              
-              showSnackbar('Dados importados com sucesso', 'success');
+            const patientsData = Array.isArray(importedData.patients) ? importedData.patients : [];
+            const prescriptionsData = Array.isArray(importedData.prescriptions) ? importedData.prescriptions : [];
+            const appointmentsData = Array.isArray(importedData.appointments) ? importedData.appointments : [];
+            const recordsData = Array.isArray(importedData.medicalRecords) ? importedData.medicalRecords : [];
+
+            replaceAllData({
+              patients: patientsData,
+              prescriptions: prescriptionsData,
+              appointments: appointmentsData,
+              medicalRecords: recordsData,
+            });
+
+            if (importedData.userSettings && typeof importedData.userSettings === 'object') {
+              setSettings((prev) => ({
+                ...prev,
+                ...(importedData.userSettings as Partial<UserSettings>),
+              }));
             }
+
+            showSnackbar('Dados importados com sucesso', 'success');
           }
         );
       } catch (error) {
@@ -334,10 +301,28 @@ const Settings: React.FC = () => {
       // Iniciar o processo de salvamento com uma mensagem
       showSnackbar('Salvando dados no servidor...', 'warning');
 
-      // Simulação de uma operação assíncrona
-      setTimeout(() => {
-        showSnackbar('Todos os dados foram salvos no servidor com sucesso!', 'success');
-      }, 2000);
+      const token = getAuthToken();
+      if (!token) {
+        showSnackbar('Sessão inválida. Faça login novamente para sincronizar.', 'error');
+        return;
+      }
+
+      const response = await fetch(`${getApiBaseUrl()}/api/saveAll`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          patients,
+          prescriptions,
+          appointments,
+          medicalRecords,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Falha na sincronização: ${response.status}`);
+      }
+
+      showSnackbar('Todos os dados foram salvos no servidor com sucesso!', 'success');
     } catch (error) {
       console.error('Erro ao salvar dados no servidor:', error);
       showSnackbar('Erro ao salvar dados no servidor. Tente novamente.', 'error');

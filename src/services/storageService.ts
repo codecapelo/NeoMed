@@ -189,7 +189,7 @@ export const storageService = {
    */
   saveData: (key: string, value: any, userId?: string) => {
     try {
-      const prefixedKey = userId ? `${userId}_${key}` : `${STORAGE_PREFIX}${key}`;
+      const prefixedKey = userId ? getUserKey(userId, key) : `${STORAGE_PREFIX}${key}`;
       const serializedValue = JSON.stringify(value);
       localStorage.setItem(prefixedKey, serializedValue);
       return { success: true };
@@ -214,7 +214,7 @@ export const storageService = {
    */
   loadData: <T>(key: string, defaultValue: T, userId?: string): T => {
     try {
-      const prefixedKey = userId ? `${userId}_${key}` : `${STORAGE_PREFIX}${key}`;
+      const prefixedKey = userId ? getUserKey(userId, key) : `${STORAGE_PREFIX}${key}`;
       const serializedValue = localStorage.getItem(prefixedKey);
       
       if (serializedValue === null) {
@@ -235,7 +235,7 @@ export const storageService = {
    */
   removeData: (key: string, userId?: string) => {
     try {
-      const prefixedKey = userId ? `${userId}_${key}` : `${STORAGE_PREFIX}${key}`;
+      const prefixedKey = userId ? getUserKey(userId, key) : `${STORAGE_PREFIX}${key}`;
       localStorage.removeItem(prefixedKey);
       return { success: true };
     } catch (error) {
@@ -258,7 +258,7 @@ export const storageService = {
   listUserStorageKeys: (userId: string): string[] => {
     try {
       const keys: string[] = [];
-      const prefix = `${userId}_`;
+      const prefix = `${STORAGE_PREFIX}${userId}_`;
       
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);

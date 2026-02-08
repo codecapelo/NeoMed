@@ -66,6 +66,7 @@ interface MedicationCatalogItem extends Medication {
 }
 
 type PrescriptionChannel = 'system' | 'mevo';
+const DEFAULT_MEVO_PORTAL_URL = 'https://receita.mevosaude.com.br';
 
 // Catálogo base para seleção rápida de medicamentos no formulário
 const medicationCatalog: MedicationCatalogItem[] = [
@@ -1054,8 +1055,8 @@ const Prescriptions: React.FC = () => {
     severity: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
-  const mevoLoginUrl = useMemo(() => process.env.REACT_APP_MEVO_LOGIN_URL || '', []);
-  const mevoEmbedUrl = useMemo(() => process.env.REACT_APP_MEVO_EMBED_URL || '', []);
+  const mevoLoginUrl = useMemo(() => process.env.REACT_APP_MEVO_LOGIN_URL || DEFAULT_MEVO_PORTAL_URL, []);
+  const mevoEmbedUrl = useMemo(() => process.env.REACT_APP_MEVO_EMBED_URL || DEFAULT_MEVO_PORTAL_URL, []);
   const selectedPatientForMevo = useMemo(() => {
     if (!currentPrescription.patientId) {
       return null;
@@ -1546,18 +1547,33 @@ const Prescriptions: React.FC = () => {
       return;
     }
 
-    const maxSizeBytes = 10 * 1024 * 1024;
+    const maxSizeBytes = 25 * 1024 * 1024;
     if (file.size > maxSizeBytes) {
       setMevoFeedback({
         severity: 'error',
-        message: 'O PDF excede 10MB. Envie um arquivo menor.',
+        message: 'O PDF excede 25MB. Envie um arquivo menor.',
       });
       return;
     }
 
     try {
-      const [dataUrl, lines] = await Promise.all([readFileAsDataUrl(file), extractPdfTextLines(file)]);
-      const extractedMedications = parseMedicationsFromPdfLines(lines);
+      const dataUrl = await readFileAsDataUrl(file);
+      let extractedMedications: Medication[] = [];
+      let extractionStatus: 'success' | 'failed' = 'failed';
+      let extractionMessage = 'Não foi possível identificar medicamentos no PDF automaticamente.';
+
+      try {
+        const lines = await extractPdfTextLines(file);
+        extractedMedications = parseMedicationsFromPdfLines(lines);
+        if (extractedMedications.length > 0) {
+          extractionStatus = 'success';
+          extractionMessage = `${extractedMedications.length} medicamento(s) extraído(s) automaticamente do PDF.`;
+        }
+      } catch {
+        extractionStatus = 'failed';
+        extractionMessage = 'PDF anexado com sucesso, mas a leitura automática de medicamentos falhou.';
+      }
+
       setCurrentPrescription((prev) => ({
         ...prev,
         medications: extractedMedications.length > 0 ? extractedMedications : prev.medications || [],
@@ -1568,11 +1584,8 @@ const Prescriptions: React.FC = () => {
           pdfDataUrl: dataUrl,
           uploadedAt: new Date().toISOString(),
           extractedMedicationsCount: extractedMedications.length,
-          extractionStatus: extractedMedications.length > 0 ? 'success' : 'failed',
-          extractionMessage:
-            extractedMedications.length > 0
-              ? `${extractedMedications.length} medicamento(s) extraído(s) automaticamente do PDF.`
-              : 'Não foi possível identificar medicamentos no PDF automaticamente.',
+          extractionStatus,
+          extractionMessage,
         },
       }));
       setMevoFeedback({
@@ -1580,7 +1593,7 @@ const Prescriptions: React.FC = () => {
         message:
           extractedMedications.length > 0
             ? `PDF anexado e ${extractedMedications.length} medicamento(s) importado(s) da receita.`
-            : 'PDF anexado com sucesso, mas sem identificação automática de medicamentos.',
+            : 'PDF anexado com sucesso. Não foi possível extrair medicamentos automaticamente.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha ao anexar PDF da receita.';

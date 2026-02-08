@@ -1,15 +1,29 @@
+const { randomUUID } = require('crypto');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 
 const DATA_TYPES = ['patients', 'prescriptions', 'appointments', 'medicalRecords'];
+const USER_ROLES = ['admin', 'doctor', 'nurse', 'receptionist'];
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-User-Id',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 };
+
+const JWT_SECRET = process.env.JWT_SECRET || process.env.NETLIFY_JWT_SECRET || 'change-this-secret-in-production';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 let pool;
 let schemaReadyPromise;
+
+const appError = (statusCode, code, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
 
 const getPool = () => {
   if (pool) {
@@ -22,8 +36,10 @@ const getPool = () => {
     process.env.DATABASE_URL;
 
   if (!connectionString) {
-    throw new Error(
-      'Database URL not found. Configure NETLIFY_DATABASE_URL or NETLIFY_DATABASE_URL_UNPOOLED in Netlify.'
+    throw appError(
+      500,
+      'config/database-missing',
+      'Database URL not found. Configure NETLIFY_DATABASE_URL or NETLIFY_DATABASE_URL_UNPOOLED.'
     );
   }
 
@@ -41,8 +57,17 @@ const ensureSchema = async () => {
   if (!schemaReadyPromise) {
     schemaReadyPromise = db
       .query(`
+        CREATE TABLE IF NOT EXISTS neomed_users (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('admin', 'doctor', 'nurse', 'receptionist')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
         CREATE TABLE IF NOT EXISTS neomed_user_data (
-          user_id TEXT NOT NULL,
+          user_id TEXT NOT NULL REFERENCES neomed_users(id) ON DELETE CASCADE,
           data_type TEXT NOT NULL,
           payload JSONB NOT NULL DEFAULT '[]'::jsonb,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -93,11 +118,93 @@ const readJsonBody = (event) => {
   }
 };
 
-const getUserId = (event, body) => {
-  const queryUserId = event.queryStringParameters && event.queryStringParameters.userId;
-  const headerUserId = event.headers && (event.headers['x-user-id'] || event.headers['X-User-Id']);
+const sanitizeUser = (user) => ({
+  uid: user.id,
+  email: user.email,
+  displayName: user.name,
+  role: user.role,
+  createdAt: user.created_at,
+  photoURL: null,
+});
 
-  return body.userId || queryUserId || headerUserId || null;
+const getAuthorizationHeader = (event) => {
+  if (!event.headers) {
+    return null;
+  }
+
+  return event.headers.authorization || event.headers.Authorization || null;
+};
+
+const getTokenFromEvent = (event) => {
+  const header = getAuthorizationHeader(event);
+
+  if (!header) {
+    return null;
+  }
+
+  if (/^Bearer\s+/i.test(header)) {
+    return header.replace(/^Bearer\s+/i, '').trim();
+  }
+
+  return header.trim();
+};
+
+const signToken = (user) =>
+  jwt.sign(
+    {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      name: user.name,
+    },
+    JWT_SECRET,
+    {
+      expiresIn: JWT_EXPIRES_IN,
+      issuer: 'neomed',
+    }
+  );
+
+const requireAuth = async (event) => {
+  const token = getTokenFromEvent(event);
+  if (!token) {
+    throw appError(401, 'auth/unauthorized', 'Authentication token is required.');
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET, { issuer: 'neomed' });
+  } catch {
+    throw appError(401, 'auth/invalid-token', 'Invalid or expired authentication token.');
+  }
+
+  const db = getPool();
+  const userResult = await db.query(
+    `SELECT id, email, name, role, created_at FROM neomed_users WHERE id = $1 LIMIT 1;`,
+    [decoded.sub]
+  );
+
+  if (!userResult.rows[0]) {
+    throw appError(401, 'auth/user-not-found', 'User not found for this session.');
+  }
+
+  return userResult.rows[0];
+};
+
+const resolveTargetUserId = (authUser, event, body) => {
+  const queryUserId = event.queryStringParameters && event.queryStringParameters.userId;
+  const bodyUserId = body.userId || body.targetUserId;
+  const headerUserId = event.headers && (event.headers['x-user-id'] || event.headers['X-User-Id']);
+  const requestedUserId = bodyUserId || queryUserId || headerUserId;
+
+  if (authUser.role === 'admin') {
+    return requestedUserId || authUser.id;
+  }
+
+  if (requestedUserId && requestedUserId !== authUser.id) {
+    throw appError(403, 'auth/forbidden', 'Only administrators can access other users data.');
+  }
+
+  return authUser.id;
 };
 
 const upsertData = async (userId, dataType, payload) => {
@@ -111,24 +218,6 @@ const upsertData = async (userId, dataType, payload) => {
     `,
     [userId, dataType, JSON.stringify(payload)]
   );
-};
-
-const loadDataType = async (userId, dataType) => {
-  const db = getPool();
-  const result = await db.query(
-    `
-      SELECT payload
-      FROM neomed_user_data
-      WHERE user_id = $1 AND data_type = $2;
-    `,
-    [userId, dataType]
-  );
-
-  if (!result.rows[0]) {
-    return [];
-  }
-
-  return result.rows[0].payload;
 };
 
 const loadAllData = async (userId) => {
@@ -158,6 +247,26 @@ const loadAllData = async (userId) => {
   return data;
 };
 
+const loadDataType = async (userId, dataType) => {
+  const db = getPool();
+  const result = await db.query(
+    `
+      SELECT payload
+      FROM neomed_user_data
+      WHERE user_id = $1 AND data_type = $2;
+    `,
+    [userId, dataType]
+  );
+
+  if (!result.rows[0]) {
+    return [];
+  }
+
+  return result.rows[0].payload;
+};
+
+const isValidEmail = (email) => /\S+@\S+\.\S+/.test(email);
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -170,28 +279,152 @@ exports.handler = async (event) => {
   try {
     await ensureSchema();
 
+    const db = getPool();
     const method = event.httpMethod;
     const path = normalizePath(event);
     const body = readJsonBody(event);
-    const userId = getUserId(event, body);
 
     if (method === 'GET' && path === '/health') {
       return jsonResponse(200, { ok: true });
     }
 
-    if (!userId) {
-      return jsonResponse(400, {
-        success: false,
-        message: 'Missing userId. Send userId in body, query param or X-User-Id header.',
+    if (method === 'POST' && path === '/auth/register') {
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+      const displayName = String(body.name || '').trim();
+
+      if (!email || !isValidEmail(email)) {
+        throw appError(400, 'auth/invalid-email', 'Email is invalid.');
+      }
+
+      if (password.length < 6) {
+        throw appError(400, 'auth/weak-password', 'Password must have at least 6 characters.');
+      }
+
+      const existingUser = await db.query('SELECT id FROM neomed_users WHERE email = $1 LIMIT 1;', [email]);
+      if (existingUser.rows.length > 0) {
+        throw appError(409, 'auth/email-already-in-use', 'This email is already in use.');
+      }
+
+      const usersCountResult = await db.query('SELECT COUNT(*)::int AS count FROM neomed_users;');
+      const usersCount = Number(usersCountResult.rows[0].count || 0);
+      const role = usersCount === 0 ? 'admin' : 'doctor';
+      const id = randomUUID();
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      const insertResult = await db.query(
+        `
+          INSERT INTO neomed_users (id, email, password_hash, name, role)
+          VALUES ($1, $2, $3, $4, $5)
+          RETURNING id, email, name, role, created_at;
+        `,
+        [id, email, passwordHash, displayName || email.split('@')[0], role]
+      );
+
+      const user = insertResult.rows[0];
+      const token = signToken(user);
+
+      return jsonResponse(201, {
+        success: true,
+        user: sanitizeUser(user),
+        token,
       });
     }
+
+    if (method === 'POST' && path === '/auth/login') {
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+
+      if (!email || !password) {
+        throw appError(400, 'auth/invalid-credentials', 'Email and password are required.');
+      }
+
+      const userResult = await db.query(
+        `
+          SELECT id, email, name, role, created_at, password_hash
+          FROM neomed_users
+          WHERE email = $1
+          LIMIT 1;
+        `,
+        [email]
+      );
+
+      const user = userResult.rows[0];
+      if (!user) {
+        throw appError(401, 'auth/invalid-credentials', 'Invalid email or password.');
+      }
+
+      const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      if (!isPasswordValid) {
+        throw appError(401, 'auth/invalid-credentials', 'Invalid email or password.');
+      }
+
+      const token = signToken(user);
+
+      return jsonResponse(200, {
+        success: true,
+        user: sanitizeUser(user),
+        token,
+      });
+    }
+
+    if (method === 'GET' && path === '/auth/me') {
+      const authUser = await requireAuth(event);
+      return jsonResponse(200, {
+        success: true,
+        user: sanitizeUser(authUser),
+      });
+    }
+
+    if (method === 'POST' && path === '/auth/logout') {
+      return jsonResponse(200, {
+        success: true,
+      });
+    }
+
+    if (method === 'GET' && path === '/admin/users/count') {
+      const authUser = await requireAuth(event);
+      if (authUser.role !== 'admin') {
+        throw appError(403, 'auth/forbidden', 'Only admin can access this endpoint.');
+      }
+
+      const countResult = await db.query('SELECT COUNT(*)::int AS count FROM neomed_users;');
+      return jsonResponse(200, {
+        success: true,
+        count: Number(countResult.rows[0].count || 0),
+      });
+    }
+
+    if (method === 'GET' && path === '/admin/users') {
+      const authUser = await requireAuth(event);
+      if (authUser.role !== 'admin') {
+        throw appError(403, 'auth/forbidden', 'Only admin can access this endpoint.');
+      }
+
+      const usersResult = await db.query(
+        `
+          SELECT id, email, name, role, created_at
+          FROM neomed_users
+          ORDER BY created_at DESC;
+        `
+      );
+
+      return jsonResponse(200, {
+        success: true,
+        users: usersResult.rows.map(sanitizeUser),
+      });
+    }
+
+    // Data endpoints (require auth)
+    const authUser = await requireAuth(event);
+    const targetUserId = resolveTargetUserId(authUser, event, body);
 
     if (method === 'POST' && path === '/saveAll') {
       const payload = body || {};
 
       for (const dataType of DATA_TYPES) {
         if (payload[dataType] !== undefined) {
-          await upsertData(userId, dataType, payload[dataType]);
+          await upsertData(targetUserId, dataType, payload[dataType]);
         }
       }
 
@@ -202,7 +435,7 @@ exports.handler = async (event) => {
     }
 
     if (method === 'GET' && path === '/all') {
-      const data = await loadAllData(userId);
+      const data = await loadAllData(targetUserId);
       return jsonResponse(200, {
         success: true,
         ...data,
@@ -213,7 +446,7 @@ exports.handler = async (event) => {
     if (method === 'POST' && saveMatch) {
       const dataType = saveMatch[1];
       const payload = body.data !== undefined ? body.data : body;
-      await upsertData(userId, dataType, payload);
+      await upsertData(targetUserId, dataType, payload);
 
       return jsonResponse(200, {
         success: true,
@@ -224,7 +457,7 @@ exports.handler = async (event) => {
     const getMatch = path.match(/^\/(patients|prescriptions|appointments|medicalRecords)$/);
     if (method === 'GET' && getMatch) {
       const dataType = getMatch[1];
-      const payload = await loadDataType(userId, dataType);
+      const payload = await loadDataType(targetUserId, dataType);
 
       return jsonResponse(200, {
         success: true,
@@ -237,10 +470,10 @@ exports.handler = async (event) => {
       message: `Route not found: ${method} ${path}`,
     });
   } catch (error) {
-    return jsonResponse(500, {
+    return jsonResponse(error.statusCode || 500, {
       success: false,
-      message: 'Internal server error.',
-      error: error.message,
+      code: error.code || 'server/error',
+      message: error.message || 'Internal server error.',
     });
   }
 };

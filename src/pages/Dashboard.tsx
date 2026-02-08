@@ -1,22 +1,17 @@
-import React, { useMemo } from 'react';
-import {
-  Box,
-  Button,
-  Chip,
-  Paper,
-  Stack,
-  Typography,
-} from '@mui/material';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Button, Chip, Paper, Stack, Typography } from '@mui/material';
 import {
   ArrowForward as ArrowForwardIcon,
   CalendarMonth as AppointmentMUIcon,
   MedicalServices as RecordMUIcon,
   Medication as PrescriptionMUIcon,
   PersonAdd as PatientMUIcon,
+  Groups as GroupsIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
+import { getApiBaseUrl, getAuthToken } from '../services/authService';
 import DashboardCard from '../components/DashboardCard';
 import PatientIcon from '../assets/icons/patient.svg';
 import AppointmentIcon from '../assets/icons/appointment.svg';
@@ -28,6 +23,43 @@ const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const { patients, appointments, prescriptions, medicalRecords } = useData();
+  const [registeredUsersCount, setRegisteredUsersCount] = useState<number | null>(null);
+
+  const isAdmin = !!currentUser && typeof currentUser === 'object' && currentUser.role === 'admin';
+
+  useEffect(() => {
+    const loadUsersCount = async () => {
+      if (!isAdmin) {
+        setRegisteredUsersCount(null);
+        return;
+      }
+
+      const token = getAuthToken();
+      if (!token) {
+        setRegisteredUsersCount(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/api/admin/users/count`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Nao foi possivel carregar contagem de usuarios.');
+        }
+
+        const payload = await response.json();
+        setRegisteredUsersCount(typeof payload.count === 'number' ? payload.count : null);
+      } catch {
+        setRegisteredUsersCount(null);
+      }
+    };
+
+    loadUsersCount();
+  }, [isAdmin]);
 
   const userName = useMemo(() => {
     if (!currentUser || typeof currentUser !== 'object') {
@@ -132,6 +164,17 @@ const Dashboard: React.FC = () => {
                   }}
                 />
               ))}
+              {isAdmin && (
+                <Chip
+                  icon={<GroupsIcon fontSize="small" />}
+                  label={`Usuarios cadastrados: ${registeredUsersCount ?? '...'}`}
+                  sx={{
+                    backgroundColor: '#3949ab1a',
+                    color: '#3949ab',
+                    fontWeight: 600,
+                  }}
+                />
+              )}
             </Stack>
           </Box>
 
@@ -142,11 +185,7 @@ const Dashboard: React.FC = () => {
             <Typography variant="h2" className="dashboard-kpi-value">
               {totalRegistros}
             </Typography>
-            <Button
-              variant="contained"
-              endIcon={<ArrowForwardIcon />}
-              onClick={() => navigate('/pacientes')}
-            >
+            <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={() => navigate('/pacientes')}>
               Ir para pacientes
             </Button>
           </Box>

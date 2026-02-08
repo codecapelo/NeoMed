@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import usePersistentState from '../hooks/usePersistentState';
 import { useAuth } from './AuthContext';
+import { getAuthHeaders, getAuthToken } from '../services/authService';
 
 interface Patient {
   id: string;
@@ -124,7 +125,7 @@ export function DataProvider({ children }: DataProviderProps) {
   const { currentUser } = useAuth();
   const apiBase = useMemo(() => getApiBase(), []);
 
-  const userId = useMemo(() => {
+  const authUserId = useMemo(() => {
     if (!currentUser || typeof currentUser !== 'object') {
       return null;
     }
@@ -143,7 +144,8 @@ export function DataProvider({ children }: DataProviderProps) {
       skipNextServerSync.current = true;
       setIsHydratedFromServer(false);
 
-      if (!userId) {
+      const token = getAuthToken();
+      if (!token || !authUserId) {
         if (!cancelled) {
           setIsHydratedFromServer(true);
         }
@@ -151,7 +153,12 @@ export function DataProvider({ children }: DataProviderProps) {
       }
 
       try {
-        const response = await fetch(`${apiBase}/api/all?userId=${encodeURIComponent(userId)}`);
+        const response = await fetch(`${apiBase}/api/all`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
         if (!response.ok) {
           throw new Error(`Failed to load remote data: ${response.status}`);
         }
@@ -179,10 +186,10 @@ export function DataProvider({ children }: DataProviderProps) {
     return () => {
       cancelled = true;
     };
-  }, [apiBase, userId, setAppointments, setMedicalRecords, setPatients, setPrescriptions]);
+  }, [apiBase, authUserId, setAppointments, setMedicalRecords, setPatients, setPrescriptions]);
 
   useEffect(() => {
-    if (!userId || !isHydratedFromServer) {
+    if (!isHydratedFromServer || !authUserId) {
       return;
     }
 
@@ -195,11 +202,8 @@ export function DataProvider({ children }: DataProviderProps) {
       try {
         await fetch(`${apiBase}/api/saveAll`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
-            userId,
             patients,
             prescriptions,
             appointments,
@@ -212,15 +216,7 @@ export function DataProvider({ children }: DataProviderProps) {
     }, 700);
 
     return () => clearTimeout(timeout);
-  }, [
-    apiBase,
-    userId,
-    isHydratedFromServer,
-    patients,
-    prescriptions,
-    appointments,
-    medicalRecords,
-  ]);
+  }, [apiBase, authUserId, isHydratedFromServer, patients, prescriptions, appointments, medicalRecords]);
 
   const addPatient = useCallback(
     (patientData: Patient) => {

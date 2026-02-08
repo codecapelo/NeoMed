@@ -37,8 +37,10 @@ import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import logoSvg from '../../assets/images/logo-medical.svg';
 import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
+import { getAuthHeaders } from '../../services/authService';
 
 const drawerWidth = 264;
+
 const getApiBase = () => {
   if (process.env.REACT_APP_API_BASE) {
     return process.env.REACT_APP_API_BASE;
@@ -140,9 +142,7 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   const handleSaveAllData = async () => {
-    const userId = currentUser && typeof currentUser === 'object' && 'uid' in currentUser ? String(currentUser.uid) : null;
-
-    if (!userId) {
+    if (!currentUser) {
       setToast({
         open: true,
         message: 'Usuario nao identificado para salvar dados.',
@@ -156,11 +156,8 @@ export default function Layout({ children }: LayoutProps) {
     try {
       const response = await fetch(`${apiBase}/api/saveAll`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
-          userId,
           patients,
           prescriptions,
           appointments,
@@ -215,10 +212,7 @@ export default function Layout({ children }: LayoutProps) {
       <List sx={{ mt: 1, px: 1 }}>
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
-            <ListItemButton
-              selected={location.pathname === item.path}
-              onClick={() => handleNavigation(item.path)}
-            >
+            <ListItemButton selected={location.pathname === item.path} onClick={() => handleNavigation(item.path)}>
               <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>{item.icon}</ListItemIcon>
               <ListItemText primary={item.text} />
             </ListItemButton>
@@ -260,11 +254,7 @@ export default function Layout({ children }: LayoutProps) {
           </IconButton>
 
           <Box display="flex" alignItems="center" sx={{ flexGrow: 1, gap: 1.5 }}>
-            <Avatar
-              src={logoSvg}
-              alt="NeoMed"
-              sx={{ width: 34, height: 34, display: { xs: 'none', sm: 'inline-flex' } }}
-            />
+            <Avatar src={logoSvg} alt="NeoMed" sx={{ width: 34, height: 34, display: { xs: 'none', sm: 'inline-flex' } }} />
             <Box>
               <Typography variant="subtitle1" sx={{ fontWeight: 700, lineHeight: 1.1 }}>
                 Prontuario Clinico NeoMed

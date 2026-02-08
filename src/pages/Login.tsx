@@ -1,25 +1,24 @@
 import React, { useState } from 'react';
-import { 
-  Box, 
-  Button, 
-  Paper, 
-  Typography, 
-  Container, 
-  CircularProgress,
+import {
   Alert,
-  Snackbar,
-  Divider,
-  Stack,
+  Box,
+  Button,
+  CircularProgress,
+  Container,
   Link as MuiLink,
+  Paper,
+  Snackbar,
+  Stack,
+  Typography,
 } from '@mui/material';
-import { Google as GoogleIcon, Email as EmailIcon } from '@mui/icons-material';
-import { useAuth } from '../context/AuthContext';
+import { Email as EmailIcon } from '@mui/icons-material';
 import { Navigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import logoSvg from '../assets/images/logo-medical.svg';
 import EnhancedTextField from '../components/common/EnhancedTextField';
 
 export default function Login() {
-  const { signInWithGoogle, signInWithEmail, signUpWithEmail, currentUser, loading, error, clearError } = useAuth();
+  const { signInWithEmail, signUpWithEmail, currentUser, loading, error, clearError } = useAuth();
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,15 +35,15 @@ export default function Login() {
     setNameError('');
 
     if (!email) {
-      setEmailError('Email é obrigatório');
+      setEmailError('Email e obrigatorio');
       isValid = false;
     } else if (!/\S+@\S+\.\S+/.test(email)) {
-      setEmailError('Email inválido');
+      setEmailError('Email invalido');
       isValid = false;
     }
 
     if (!password) {
-      setPasswordError('Senha é obrigatória');
+      setPasswordError('Senha e obrigatoria');
       isValid = false;
     } else if (password.length < 6) {
       setPasswordError('A senha deve ter pelo menos 6 caracteres');
@@ -52,35 +51,35 @@ export default function Login() {
     }
 
     if (showSignup && !name) {
-      setNameError('Nome é obrigatório');
+      setNameError('Nome e obrigatorio');
       isValid = false;
     }
 
     return isValid;
   };
 
-  const handleGoogleLogin = async () => {
-    setIsLoggingIn(true);
-    await signInWithGoogle();
-    setIsLoggingIn(false);
-  };
+  const handleEmailLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm()) return;
-    
-    setIsLoggingIn(true);
-    if (showSignup) {
-      await signUpWithEmail(email, password, name);
-    } else {
-      await signInWithEmail(email, password);
+    if (!validateForm()) {
+      return;
     }
-    setIsLoggingIn(false);
+
+    setIsLoggingIn(true);
+
+    try {
+      if (showSignup) {
+        await signUpWithEmail(email, password, name);
+      } else {
+        await signInWithEmail(email, password);
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
   const toggleForm = () => {
-    setShowSignup(!showSignup);
+    setShowSignup((prev) => !prev);
     setEmail('');
     setPassword('');
     setName('');
@@ -91,14 +90,7 @@ export default function Login() {
 
   if (loading) {
     return (
-      <Box 
-        sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
-          height: '100vh'
-        }}
-      >
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
       </Box>
     );
@@ -110,9 +102,9 @@ export default function Login() {
 
   return (
     <Container component="main" maxWidth="xs">
-      <Snackbar 
-        open={!!error} 
-        autoHideDuration={6000} 
+      <Snackbar
+        open={!!error}
+        autoHideDuration={6000}
         onClose={clearError}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
       >
@@ -120,15 +112,8 @@ export default function Login() {
           {error}
         </Alert>
       </Snackbar>
-      
-      <Box
-        sx={{
-          marginTop: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-      >
+
+      <Box sx={{ marginTop: 8, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <Paper
           elevation={3}
           sx={{
@@ -141,23 +126,16 @@ export default function Login() {
             bgcolor: 'background.paper',
           }}
         >
-          <Box 
-            component="img"
-            src={logoSvg} 
-            alt="NeoMed Logo" 
-            sx={{ 
-              width: 120, 
-              height: 120, 
-              mb: 2 
-            }} 
-          />
-          
+          <Box component="img" src={logoSvg} alt="NeoMed Logo" sx={{ width: 120, height: 120, mb: 2 }} />
+
           <Typography component="h1" variant="h5" sx={{ mb: 2 }}>
             {showSignup ? 'Criar Nova Conta' : 'Entrar na sua Conta'}
           </Typography>
-          
+
           <Typography variant="body2" sx={{ mb: 3, textAlign: 'center' }}>
-            {showSignup ? 'Crie sua conta para começar a usar o sistema' : 'Faça login para acessar o sistema de gerenciamento médico'}
+            {showSignup
+              ? 'Crie sua conta para comecar a usar o sistema'
+              : 'Faca login para acessar o sistema de gerenciamento medico'}
           </Typography>
 
           <form onSubmit={handleEmailLogin} style={{ width: '100%' }}>
@@ -171,13 +149,13 @@ export default function Login() {
                   name="name"
                   autoComplete="name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(event) => setName(event.target.value)}
                   error={!!nameError}
                   helperText={nameError}
                   disabled={isLoggingIn}
                 />
               )}
-              
+
               <EnhancedTextField
                 required
                 fullWidth
@@ -186,12 +164,12 @@ export default function Login() {
                 name="email"
                 autoComplete="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 error={!!emailError}
                 helperText={emailError}
                 disabled={isLoggingIn}
               />
-              
+
               <EnhancedTextField
                 required
                 fullWidth
@@ -201,12 +179,12 @@ export default function Login() {
                 id="password"
                 autoComplete={showSignup ? 'new-password' : 'current-password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(event) => setPassword(event.target.value)}
                 error={!!passwordError}
                 helperText={passwordError}
                 disabled={isLoggingIn}
               />
-              
+
               <Button
                 type="submit"
                 fullWidth
@@ -214,60 +192,24 @@ export default function Login() {
                 color="primary"
                 startIcon={<EmailIcon />}
                 disabled={isLoggingIn}
-                sx={{ 
-                  py: 1.5,
-                  borderRadius: 2,
-                  textTransform: 'none',
-                  fontWeight: 500
-                }}
+                sx={{ py: 1.5, borderRadius: 2, textTransform: 'none', fontWeight: 500 }}
               >
-                {isLoggingIn 
-                  ? 'Processando...' 
-                  : showSignup 
-                    ? 'Criar Conta' 
-                    : 'Entrar com Email'
-                }
+                {isLoggingIn ? 'Processando...' : showSignup ? 'Criar Conta' : 'Entrar com Email'}
               </Button>
             </Stack>
           </form>
-          
-          <Divider sx={{ width: '100%', my: 3 }}>ou</Divider>
-          
-          <Button
-            fullWidth
-            variant="outlined"
-            startIcon={<GoogleIcon />}
-            onClick={handleGoogleLogin}
-            disabled={isLoggingIn}
-            sx={{ 
-              py: 1.5,
-              borderRadius: 2,
-              textTransform: 'none',
-              fontWeight: 500
-            }}
-          >
-            {isLoggingIn ? 'Processando...' : 'Continuar com Google'}
-          </Button>
-          
+
           <Box sx={{ mt: 3, textAlign: 'center' }}>
-            <MuiLink 
-              component="button" 
-              variant="body2" 
-              onClick={toggleForm}
-              sx={{ cursor: 'pointer' }}
-            >
-              {showSignup 
-                ? 'Já tem uma conta? Faça login' 
-                : 'Não tem uma conta? Cadastre-se'
-              }
+            <MuiLink component="button" variant="body2" onClick={toggleForm} sx={{ cursor: 'pointer' }}>
+              {showSignup ? 'Ja tem uma conta? Faca login' : 'Nao tem uma conta? Cadastre-se'}
             </MuiLink>
           </Box>
         </Paper>
-        
+
         <Typography variant="body2" color="text.secondary" sx={{ mt: 4 }}>
           &copy; {new Date().getFullYear()} NeoMed. Todos os direitos reservados.
         </Typography>
       </Box>
     </Container>
   );
-} 
+}

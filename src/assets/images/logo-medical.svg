@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">NeoMed Logo</title>
+  <desc id="desc">Logo medico com cruz e traçado de pulso cardiaco em esfera com gradiente azul e turquesa.</desc>
+
+  <defs>
+    <linearGradient id="bgGradient" x1="78" y1="54" x2="434" y2="456" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0FB5C8"/>
+      <stop offset="0.55" stop-color="#1976D2"/>
+      <stop offset="1" stop-color="#124D93"/>
+    </linearGradient>
+
+    <radialGradient id="highlight" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(178 144) rotate(45) scale(236)">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="pulseGradient" x1="148" y1="257" x2="364" y2="257" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D8F8FF"/>
+      <stop offset="1" stop-color="#7DE9FF"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#0A2C52" flood-opacity="0.26"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <circle cx="256" cy="256" r="228" fill="url(#bgGradient)"/>
+  </g>
+
+  <circle cx="256" cy="256" r="228" fill="url(#highlight)"/>
+  <circle cx="256" cy="256" r="224" fill="none" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="8"/>
+
+  <g>
+    <rect x="198" y="128" width="116" height="256" rx="26" fill="#FFFFFF"/>
+    <rect x="128" y="198" width="256" height="116" rx="26" fill="#FFFFFF"/>
+  </g>
+
+  <path d="M148 257H200L220 224L246 296L274 200L298 257H364"
+        fill="none"
+        stroke="url(#pulseGradient)"
+        stroke-width="18"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <circle cx="256" cy="256" r="18" fill="#B8F3FF"/>
+</svg>

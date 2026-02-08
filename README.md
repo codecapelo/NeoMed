@@ -1,46 +1,99 @@
-# Getting Started with Create React App
+# NeoMed - Sistema de Gestão Médica
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Sistema completo para gerenciamento de prescrições, prontuários médicos, receitas e acompanhamento de pacientes com integração CID-11 e sugestões de condutas terapêuticas baseadas em diretrizes americanas e brasileiras.
 
-## Available Scripts
+## Funcionalidades
 
-In the project directory, you can run:
+### Cadastro e Gerenciamento de Pacientes
+- Registro detalhado de dados pessoais e histórico clínico
+- Integração com CID-11 para classificação da condição clínica
+- Sugestões automáticas de condutas terapêuticas
 
-### `npm start`
+### Registro e Atualização de Prontuários
+- Armazenamento seguro de históricos médicos
+- Visualização e edição de registros com histórico
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+### Emissão e Gerenciamento de Receitas Médicas
+- Aba dedicada para seleção de medicamentos
+- Definição de dosagem, posologia e instruções
+- Montagem de prescrição completa
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+### Acompanhamento de Pacientes
+- Agendamento de consultas e lembretes
+- Monitoramento de tratamentos com notificações
 
-### `npm test`
+### Atualização Dinâmica de Conteúdo
+- Importação de arquivos para atualização do banco de dados
+- Manutenção contínua de medicações e diretrizes
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## Tecnologias Utilizadas
 
-### `npm run build`
+- **Frontend**: React.js, TypeScript, Material UI
+- **Gerenciamento de Estado**: React Hooks, Context API
+- **Roteamento**: React Router
+- **Validação**: Formik, Yup
+- **Requisições HTTP**: Axios, React Query
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Começando
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+### Pré-requisitos
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+- Node.js (versão 14 ou superior)
+- npm ou yarn
 
-### `npm run eject`
+### Instalação
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
+1. Clone o repositório
+```bash
+git clone https://github.com/seu-usuario/neomed.git
+cd neomed
+```
 
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+2. Instale as dependências
+```bash
+npm install
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
+3. Execute o projeto em modo de desenvolvimento
+```bash
+npm start
+```
 
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
+A aplicação estará disponível em `http://localhost:3000`.
 
-## Learn More
+## Estrutura do Projeto
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+```
+neomed/
+├── public/
+├── src/
+│   ├── components/
+│   │   ├── common/
+│   │   ├── patients/
+│   │   ├── prescriptions/
+│   │   └── medical-records/
+│   ├── pages/
+│   ├── context/
+│   ├── services/
+│   ├── hooks/
+│   ├── types/
+│   └── utils/
+├── package.json
+└── README.md
+```
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## Contribuindo
+
+1. Faça um fork do projeto
+2. Crie sua branch de feature (`git checkout -b feature/nome-da-feature`)
+3. Commit suas alterações (`git commit -m 'Adiciona feature xyz'`)
+4. Push para a branch (`git push origin feature/nome-da-feature`)
+5. Abra um Pull Request
+
+## Licença
+
+Este projeto está licenciado sob a Licença MIT - veja o arquivo LICENSE para detalhes.
+
+## Contato
+
+Equipe NeoMed - contato@neomed.med.br

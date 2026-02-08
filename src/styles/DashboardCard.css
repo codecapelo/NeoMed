@@ -1,0 +1,58 @@
+.dashboard-card {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.96) 0%, rgba(233, 247, 252, 0.9) 100%);
+  border: 1px solid rgba(8, 89, 101, 0.12);
+  border-radius: 18px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  box-shadow: 0 8px 18px rgba(8, 70, 84, 0.09);
+  outline: none;
+}
+
+.dashboard-card:hover,
+.dashboard-card:focus-visible {
+  transform: translateY(-4px);
+  box-shadow: 0 14px 24px rgba(8, 70, 84, 0.14);
+  border-color: rgba(8, 89, 101, 0.26);
+}
+
+.dashboard-card-icon {
+  background: linear-gradient(135deg, #d7f0f8 0%, #ebf9ff 100%);
+  border: 1px solid rgba(8, 89, 101, 0.2);
+  border-radius: 14px;
+  width: 60px;
+  height: 60px;
+  min-width: 60px;
+  display: grid;
+  place-items: center;
+}
+
+.dashboard-card-icon img {
+  width: 30px;
+  height: 30px;
+}
+
+.dashboard-card-content {
+  flex: 1;
+}
+
+.dashboard-card-content h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #0f3741;
+}
+
+.dashboard-card-content p {
+  margin: 4px 0 10px;
+  font-size: 0.88rem;
+  color: #4b6971;
+}
+
+.dashboard-card-count {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #0f7a8a;
+}

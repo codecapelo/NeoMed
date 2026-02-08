@@ -1080,6 +1080,60 @@ const Prescriptions: React.FC = () => {
 
     return '';
   }, [mevoSignatureSession?.embedUrl]);
+  const selectedPatientForMevo = useMemo(() => {
+    if (!currentPrescription.patientId) {
+      return null;
+    }
+
+    return patients.find((patient) => patient.id === currentPrescription.patientId) || null;
+  }, [currentPrescription.patientId, patients]);
+  const mevoPortalUrl = useMemo(() => {
+    if (!mevoEmbedUrl) {
+      return '';
+    }
+
+    try {
+      const url = new URL(mevoEmbedUrl);
+      const medsSummary = (currentPrescription.medications || [])
+        .map((med) => `${med.name} ${med.dosage} - ${med.frequency}`)
+        .join('; ');
+
+      const prefillEntries: Array<[string, string | undefined]> = [
+        ['source', 'neomed'],
+        ['prefill_patient_id', selectedPatientForMevo?.id],
+        ['prefill_patient_name', selectedPatientForMevo?.name],
+        ['prefill_patient_birth_date', selectedPatientForMevo?.dateOfBirth || selectedPatientForMevo?.birthDate],
+        ['prefill_patient_email', selectedPatientForMevo?.email],
+        ['prefill_patient_phone', selectedPatientForMevo?.phone],
+        ['prefill_patient_gender', selectedPatientForMevo?.gender],
+        ['prefill_cid10_code', selectedPatientForMevo?.cid10Code],
+        ['prefill_cid10_description', selectedPatientForMevo?.cid10Description],
+        ['prefill_prescription_date', currentPrescription.date],
+        ['prefill_prescription_valid_until', currentPrescription.validUntil],
+        ['prefill_medications', medsSummary || undefined],
+        ['prefill_instructions', currentPrescription.instructions],
+        ['prefill_doctor_notes', currentPrescription.doctorNotes],
+      ];
+
+      prefillEntries.forEach(([key, value]) => {
+        if (value && String(value).trim()) {
+          url.searchParams.set(key, String(value));
+        }
+      });
+
+      return url.toString();
+    } catch {
+      return mevoEmbedUrl;
+    }
+  }, [
+    currentPrescription.date,
+    currentPrescription.doctorNotes,
+    currentPrescription.instructions,
+    currentPrescription.medications,
+    currentPrescription.validUntil,
+    mevoEmbedUrl,
+    selectedPatientForMevo,
+  ]);
 
   const filteredMedicationCatalog = useMemo(() => {
     const term = medicationSearchTerm.trim().toLowerCase();
@@ -1716,24 +1770,33 @@ const Prescriptions: React.FC = () => {
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
                       Passo 2: Sistema Mevo
                     </Typography>
+                    {selectedPatientForMevo ? (
+                      <Alert severity="success" sx={{ mb: 2 }}>
+                        Abrindo Mevo com prefill do cadastro do paciente e dados da prescrição atual.
+                      </Alert>
+                    ) : (
+                      <Alert severity="info" sx={{ mb: 2 }}>
+                        Selecione um paciente para enviar dados de cadastro automaticamente ao abrir o Mevo.
+                      </Alert>
+                    )}
                     {!mevoSignatureSession?.authenticated && (
                       <Alert severity="warning" sx={{ mb: 2 }}>
                         Primeiro autentique a assinatura digital para liberar emissão na Mevo.
                       </Alert>
                     )}
-                    {mevoEmbedUrl ? (
+                    {mevoPortalUrl ? (
                       <>
                         <Button
                           variant="outlined"
                           startIcon={<OpenInNewIcon />}
-                          onClick={() => window.open(mevoEmbedUrl, '_blank', 'noopener,noreferrer')}
+                          onClick={() => window.open(mevoPortalUrl, '_blank', 'noopener,noreferrer')}
                           sx={{ mb: 1.5 }}
                         >
                           Abrir Sistema Mevo em nova aba
                         </Button>
                         <Box
                           component="iframe"
-                          src={mevoEmbedUrl}
+                          src={mevoPortalUrl}
                           title="Sistema Mevo"
                           sx={{
                             width: '100%',

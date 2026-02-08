@@ -5,8 +5,11 @@ import React, {
   ReactNode,
   useEffect,
   useMemo,
+  useRef,
+  useState,
 } from 'react';
 import usePersistentState from '../hooks/usePersistentState';
+import { useAuth } from './AuthContext';
 
 interface Patient {
   id: string;
@@ -77,6 +80,26 @@ interface DataContextType {
 
 const DataContext = createContext<DataContextType | null>(null);
 
+const getApiBase = () => {
+  if (process.env.REACT_APP_API_BASE) {
+    return process.env.REACT_APP_API_BASE;
+  }
+
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:3001';
+  }
+
+  return '';
+};
+
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+};
+
 export function useData() {
   const context = useContext(DataContext);
   if (!context) {
@@ -89,129 +112,114 @@ interface DataProviderProps {
   children: ReactNode;
 }
 
-const initialPatients: Patient[] = [
-  {
-    id: '1',
-    name: 'Joao Silva',
-    email: 'joao.silva@email.com',
-    phone: '(11) 98765-4321',
-    birthDate: '1985-05-15',
-    gender: 'male',
-    address: 'Rua das Flores, 123 - Sao Paulo, SP',
-    healthInsurance: 'Unimed',
-  },
-  {
-    id: '2',
-    name: 'Maria Oliveira',
-    email: 'maria.oliveira@email.com',
-    phone: '(11) 91234-5678',
-    birthDate: '1990-10-20',
-    gender: 'female',
-    address: 'Av. Paulista, 1578 - Sao Paulo, SP',
-    healthInsurance: 'Bradesco Saude',
-  },
-];
-
-const initialPrescriptions: Prescription[] = [
-  {
-    id: '1',
-    patientId: '1',
-    medication: 'Losartana',
-    dosage: '50mg',
-    frequency: '1x ao dia',
-    startDate: '2023-03-15',
-    endDate: '2023-06-15',
-    observations: 'Tomar pela manha',
-  },
-  {
-    id: '2',
-    patientId: '2',
-    medication: 'Metformina',
-    dosage: '500mg',
-    frequency: '2x ao dia',
-    startDate: '2023-04-10',
-    endDate: '2023-07-10',
-    observations: 'Tomar apos as refeicoes',
-  },
-];
-
-const initialAppointments: Appointment[] = [
-  {
-    id: '1',
-    patientId: '1',
-    date: '2023-05-20',
-    time: '14:30',
-    status: 'scheduled',
-    notes: 'Consulta de rotina',
-  },
-  {
-    id: '2',
-    patientId: '2',
-    date: '2023-05-22',
-    time: '10:15',
-    status: 'scheduled',
-    notes: 'Acompanhamento de tratamento',
-  },
-];
-
-const initialMedicalRecords: MedicalRecord[] = [
-  {
-    id: '1',
-    patientId: '1',
-    date: '2023-02-15',
-    diagnosis: 'Hipertensao Arterial',
-    treatment: 'Medicacao e mudanca de habitos',
-    notes: 'Paciente apresentou melhora nos niveis pressoricos',
-  },
-  {
-    id: '2',
-    patientId: '2',
-    date: '2023-03-10',
-    diagnosis: 'Diabetes Tipo 2',
-    treatment: 'Medicacao e dieta',
-    notes: 'Necessario acompanhamento com nutricionista',
-  },
-];
-
-const generateId = () => {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-};
-
 export function DataProvider({ children }: DataProviderProps) {
   const [patients, setPatients] = usePersistentState<Patient[]>('patients', []);
   const [prescriptions, setPrescriptions] = usePersistentState<Prescription[]>('prescriptions', []);
   const [appointments, setAppointments] = usePersistentState<Appointment[]>('appointments', []);
   const [medicalRecords, setMedicalRecords] = usePersistentState<MedicalRecord[]>('medicalRecords', []);
 
+  const [isHydratedFromServer, setIsHydratedFromServer] = useState(false);
+  const skipNextServerSync = useRef(true);
+
+  const { currentUser } = useAuth();
+  const apiBase = useMemo(() => getApiBase(), []);
+
+  const userId = useMemo(() => {
+    if (!currentUser || typeof currentUser !== 'object') {
+      return null;
+    }
+
+    if ('uid' in currentUser && currentUser.uid) {
+      return String(currentUser.uid);
+    }
+
+    return null;
+  }, [currentUser]);
+
   useEffect(() => {
-    if (patients.length === 0) {
-      setPatients(initialPatients);
+    let cancelled = false;
+
+    const hydrateFromServer = async () => {
+      skipNextServerSync.current = true;
+      setIsHydratedFromServer(false);
+
+      if (!userId) {
+        if (!cancelled) {
+          setIsHydratedFromServer(true);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(`${apiBase}/api/all?userId=${encodeURIComponent(userId)}`);
+        if (!response.ok) {
+          throw new Error(`Failed to load remote data: ${response.status}`);
+        }
+
+        const payload = await response.json();
+        if (cancelled) {
+          return;
+        }
+
+        setPatients(Array.isArray(payload.patients) ? payload.patients : []);
+        setPrescriptions(Array.isArray(payload.prescriptions) ? payload.prescriptions : []);
+        setAppointments(Array.isArray(payload.appointments) ? payload.appointments : []);
+        setMedicalRecords(Array.isArray(payload.medicalRecords) ? payload.medicalRecords : []);
+      } catch {
+        // Keep local persisted values when server is unavailable.
+      } finally {
+        if (!cancelled) {
+          setIsHydratedFromServer(true);
+        }
+      }
+    };
+
+    hydrateFromServer();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, userId, setAppointments, setMedicalRecords, setPatients, setPrescriptions]);
+
+  useEffect(() => {
+    if (!userId || !isHydratedFromServer) {
+      return;
     }
 
-    if (prescriptions.length === 0) {
-      setPrescriptions(initialPrescriptions);
+    if (skipNextServerSync.current) {
+      skipNextServerSync.current = false;
+      return;
     }
 
-    if (appointments.length === 0) {
-      setAppointments(initialAppointments);
-    }
+    const timeout = setTimeout(async () => {
+      try {
+        await fetch(`${apiBase}/api/saveAll`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId,
+            patients,
+            prescriptions,
+            appointments,
+            medicalRecords,
+          }),
+        });
+      } catch {
+        // Local persistence still works even if remote sync fails.
+      }
+    }, 700);
 
-    if (medicalRecords.length === 0) {
-      setMedicalRecords(initialMedicalRecords);
-    }
+    return () => clearTimeout(timeout);
   }, [
-    appointments.length,
-    medicalRecords.length,
-    patients.length,
-    prescriptions.length,
-    setAppointments,
-    setMedicalRecords,
-    setPatients,
-    setPrescriptions,
+    apiBase,
+    userId,
+    isHydratedFromServer,
+    patients,
+    prescriptions,
+    appointments,
+    medicalRecords,
   ]);
 
   const addPatient = useCallback(
@@ -325,7 +333,9 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const updateMedicalRecord = useCallback(
     (id: string, recordUpdate: Partial<MedicalRecord>) => {
-      setMedicalRecords((prev) => prev.map((record) => (record.id === id ? { ...record, ...recordUpdate } : record)));
+      setMedicalRecords((prev) =>
+        prev.map((record) => (record.id === id ? { ...record, ...recordUpdate } : record))
+      );
     },
     [setMedicalRecords]
   );

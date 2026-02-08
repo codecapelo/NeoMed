@@ -39,7 +39,17 @@ import { useAuth } from '../../context/AuthContext';
 import { useData } from '../../context/DataContext';
 
 const drawerWidth = 264;
-const API_URL = 'http://localhost:3001';
+const getApiBase = () => {
+  if (process.env.REACT_APP_API_BASE) {
+    return process.env.REACT_APP_API_BASE;
+  }
+
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:3001';
+  }
+
+  return '';
+};
 
 interface LayoutProps {
   children?: React.ReactNode;
@@ -74,6 +84,7 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { logout, currentUser } = useAuth();
+  const apiBase = useMemo(() => getApiBase(), []);
   const { patients, prescriptions, appointments, medicalRecords } = useData();
 
   const userEmail = useMemo(() => {
@@ -129,15 +140,27 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   const handleSaveAllData = async () => {
+    const userId = currentUser && typeof currentUser === 'object' && 'uid' in currentUser ? String(currentUser.uid) : null;
+
+    if (!userId) {
+      setToast({
+        open: true,
+        message: 'Usuario nao identificado para salvar dados.',
+        severity: 'error',
+      });
+      return;
+    }
+
     setSavingData(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/saveAll`, {
+      const response = await fetch(`${apiBase}/api/saveAll`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          userId,
           patients,
           prescriptions,
           appointments,

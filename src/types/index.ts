@@ -36,6 +36,15 @@ export interface Prescription {
   validUntil?: string;
   prescriptionChannel?: 'system' | 'mevo';
   mevoDocuments?: MevoDocumentStatus[];
+  mevoDigitalPrescription?: MevoDigitalPrescriptionAttachment;
+}
+
+export interface MevoDigitalPrescriptionAttachment {
+  token?: string;
+  pdfName?: string;
+  pdfMimeType?: string;
+  pdfDataUrl?: string;
+  uploadedAt?: string;
 }
 
 export interface MevoDocumentStatus {

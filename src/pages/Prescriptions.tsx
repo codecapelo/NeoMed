@@ -50,6 +50,7 @@ import {
   FactCheck as FactCheckIcon,
   OpenInNew as OpenInNewIcon,
   FileDownload as FileDownloadIcon,
+  PictureAsPdf as PictureAsPdfIcon,
 } from '@mui/icons-material';
 import { Prescription, Medication, Patient, MevoDocumentStatus } from '../types';
 import { EnhancedTextField, EnhancedTextArea } from '../components/common';
@@ -1435,6 +1436,110 @@ const Prescriptions: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const readFileAsDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Não foi possível ler o arquivo PDF selecionado.'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleMevoTokenChange = (token: string) => {
+    setCurrentPrescription((prev) => ({
+      ...prev,
+      mevoDigitalPrescription: {
+        ...(prev.mevoDigitalPrescription || {}),
+        token,
+      },
+    }));
+  };
+
+  const handleMevoPdfUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setMevoFeedback({
+        severity: 'error',
+        message: 'Selecione um arquivo PDF válido da receita digital.',
+      });
+      return;
+    }
+
+    const maxSizeBytes = 10 * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      setMevoFeedback({
+        severity: 'error',
+        message: 'O PDF excede 10MB. Envie um arquivo menor.',
+      });
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setCurrentPrescription((prev) => ({
+        ...prev,
+        mevoDigitalPrescription: {
+          ...(prev.mevoDigitalPrescription || {}),
+          pdfName: file.name,
+          pdfMimeType: file.type || 'application/pdf',
+          pdfDataUrl: dataUrl,
+          uploadedAt: new Date().toISOString(),
+        },
+      }));
+      setMevoFeedback({
+        severity: 'success',
+        message: 'PDF da receita anexado com sucesso à prescrição.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao anexar PDF da receita.';
+      setMevoFeedback({
+        severity: 'error',
+        message,
+      });
+    }
+  };
+
+  const handleDownloadMevoPdf = () => {
+    const attachment = currentPrescription.mevoDigitalPrescription;
+    if (!attachment?.pdfDataUrl) {
+      return;
+    }
+
+    const link = document.createElement('a');
+    link.href = attachment.pdfDataUrl;
+    link.download = attachment.pdfName || 'receita_digital_mevo.pdf';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleRemoveMevoPdf = () => {
+    setCurrentPrescription((prev) => {
+      const currentAttachment = prev.mevoDigitalPrescription;
+      if (!currentAttachment) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        mevoDigitalPrescription: {
+          ...currentAttachment,
+          pdfName: undefined,
+          pdfMimeType: undefined,
+          pdfDataUrl: undefined,
+          uploadedAt: undefined,
+        },
+      };
+    });
+  };
+
   const getMevoStatusLabel = (status: string) => {
     if (status === 'emitted') return 'Emitido';
     if (status === 'pending_configuration') return 'Configurar Mevo';
@@ -1637,6 +1742,12 @@ const Prescriptions: React.FC = () => {
                       </IconButton>
                     </Box>
                     <Box display="flex" gap={0.5} flexWrap="wrap" mt={0.5}>
+                      {prescription.mevoDigitalPrescription?.token && (
+                        <Chip size="small" color="info" variant="outlined" label="Token Mevo salvo" />
+                      )}
+                      {prescription.mevoDigitalPrescription?.pdfDataUrl && (
+                        <Chip size="small" color="info" variant="outlined" label="PDF Mevo anexado" />
+                      )}
                       {(prescription.mevoDocuments || []).map((doc) => (
                         <Chip
                           key={`${prescription.id}-${doc.documentType}`}
@@ -1881,6 +1992,67 @@ const Prescriptions: React.FC = () => {
                       </Alert>
                     )}
                   </Box>
+
+                  <Box
+                    sx={{
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 1.5,
+                      p: 2,
+                      mt: 2,
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Passo 3: Anexar Receita (PDF) e Token Digital
+                    </Typography>
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      Salve aqui o PDF da receita emitida na Mevo e o token da receita digital para manter o histórico
+                      da prescrição.
+                    </Alert>
+
+                    <Box
+                      sx={{
+                        display: 'grid',
+                        gridTemplateColumns: { xs: '1fr', sm: '2fr 1fr' },
+                        gap: 1.5,
+                        alignItems: 'start',
+                      }}
+                    >
+                      <EnhancedTextField
+                        fullWidth
+                        label="Token da Receita Digital (Mevo)"
+                        value={currentPrescription.mevoDigitalPrescription?.token || ''}
+                        onChange={(event) => handleMevoTokenChange(event.target.value)}
+                        placeholder="Ex.: eyJhbGciOiJIUzI1NiIs..."
+                      />
+
+                      <Button
+                        component="label"
+                        variant="outlined"
+                        startIcon={<PictureAsPdfIcon />}
+                        sx={{ minHeight: 56 }}
+                      >
+                        Anexar PDF da Receita
+                        <input hidden accept="application/pdf" type="file" onChange={handleMevoPdfUpload} />
+                      </Button>
+                    </Box>
+
+                    {currentPrescription.mevoDigitalPrescription?.pdfDataUrl && (
+                      <Box display="flex" gap={1} mt={1.5} flexWrap="wrap" alignItems="center">
+                        <Chip
+                          color="success"
+                          icon={<PictureAsPdfIcon />}
+                          label={`PDF anexado: ${currentPrescription.mevoDigitalPrescription.pdfName || 'receita.pdf'}`}
+                        />
+                        <Button size="small" startIcon={<FileDownloadIcon />} onClick={handleDownloadMevoPdf}>
+                          Baixar PDF
+                        </Button>
+                        <Button size="small" color="error" onClick={handleRemoveMevoPdf}>
+                          Remover PDF
+                        </Button>
+                      </Box>
+                    )}
+                  </Box>
                 </Paper>
               </Grid>
             )}
@@ -1892,6 +2064,12 @@ const Prescriptions: React.FC = () => {
                     Status Mevo desta prescrição
                   </Typography>
                   <Box display="flex" gap={1} flexWrap="wrap">
+                    {currentPrescription.mevoDigitalPrescription?.token && (
+                      <Chip size="small" color="info" variant="outlined" label="Token Mevo salvo" />
+                    )}
+                    {currentPrescription.mevoDigitalPrescription?.pdfDataUrl && (
+                      <Chip size="small" color="info" variant="outlined" label="PDF Mevo anexado" />
+                    )}
                     {currentPrescription.mevoDocuments.map((doc) => (
                       <Chip
                         key={`draft-${doc.documentType}`}

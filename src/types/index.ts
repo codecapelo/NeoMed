@@ -45,6 +45,9 @@ export interface MevoDigitalPrescriptionAttachment {
   pdfMimeType?: string;
   pdfDataUrl?: string;
   uploadedAt?: string;
+  extractedMedicationsCount?: number;
+  extractionStatus?: 'success' | 'failed';
+  extractionMessage?: string;
 }
 
 export interface MevoDocumentStatus {

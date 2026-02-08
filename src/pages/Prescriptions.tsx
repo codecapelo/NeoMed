@@ -58,9 +58,6 @@ import '../styles/PrescriptionPrint.css';
 import {
   emitMevoDocument,
   MevoDocumentType,
-  createMevoSignatureSession,
-  MevoSignatureProvider,
-  MevoSignatureSession,
 } from '../services/mevoService';
 import { useData } from '../context/DataContext';
 
@@ -1048,9 +1045,6 @@ const Prescriptions: React.FC = () => {
   const [currentPrescription, setCurrentPrescription] = useState<Partial<Prescription>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [prescriptionChannel, setPrescriptionChannel] = useState<PrescriptionChannel>('system');
-  const [signatureProvider, setSignatureProvider] = useState<MevoSignatureProvider>('bird_id');
-  const [mevoSignatureSession, setMevoSignatureSession] = useState<MevoSignatureSession | null>(null);
-  const [isAuthenticatingSignature, setIsAuthenticatingSignature] = useState(false);
   const [medicationDialogOpen, setMedicationDialogOpen] = useState(false);
   const [currentMedication, setCurrentMedication] = useState<Partial<Medication & { customName?: string }>>({});
   const [editingMedicationIndex, setEditingMedicationIndex] = useState<number | null>(null);
@@ -1060,29 +1054,8 @@ const Prescriptions: React.FC = () => {
     severity: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
-  const mevoLoginUrl = useMemo(
-    () => mevoSignatureSession?.loginUrl || process.env.REACT_APP_MEVO_LOGIN_URL || '',
-    [mevoSignatureSession?.loginUrl]
-  );
-  const mevoBirdIdUrl = useMemo(
-    () => process.env.REACT_APP_MEVO_BIRD_ID_URL || '',
-    []
-  );
-  const mevoViddasUrl = useMemo(
-    () => process.env.REACT_APP_MEVO_VIDDAS_URL || '',
-    []
-  );
-  const mevoEmbedUrl = useMemo(() => {
-    if (mevoSignatureSession?.embedUrl) {
-      return mevoSignatureSession.embedUrl;
-    }
-
-    if (process.env.REACT_APP_MEVO_EMBED_URL) {
-      return process.env.REACT_APP_MEVO_EMBED_URL;
-    }
-
-    return '';
-  }, [mevoSignatureSession?.embedUrl]);
+  const mevoLoginUrl = useMemo(() => process.env.REACT_APP_MEVO_LOGIN_URL || '', []);
+  const mevoEmbedUrl = useMemo(() => process.env.REACT_APP_MEVO_EMBED_URL || '', []);
   const selectedPatientForMevo = useMemo(() => {
     if (!currentPrescription.patientId) {
       return null;
@@ -1173,9 +1146,10 @@ const Prescriptions: React.FC = () => {
   }, [patients]);
 
   const canPersistPrescription = Boolean(
-    currentPrescription.patientId && (currentPrescription.medications?.length || 0) > 0
+    currentPrescription.patientId &&
+      ((currentPrescription.medications?.length || 0) > 0 || Boolean(currentPrescription.mevoDigitalPrescription?.pdfDataUrl))
   );
-  const canEmitViaMevo = canPersistPrescription && prescriptionChannel === 'mevo' && !!mevoSignatureSession?.authenticated;
+  const canEmitViaMevo = canPersistPrescription && prescriptionChannel === 'mevo';
   const saveButtonLabel = isEditing
     ? prescriptionChannel === 'mevo'
       ? 'Atualizar no Sistema'
@@ -1191,8 +1165,6 @@ const Prescriptions: React.FC = () => {
     });
     setIsEditing(false);
     setPrescriptionChannel('system');
-    setMevoSignatureSession(null);
-    setSignatureProvider('bird_id');
     setMevoFeedback(null);
     setOpen(true);
   };
@@ -1205,8 +1177,6 @@ const Prescriptions: React.FC = () => {
         ? 'mevo'
         : 'system'
     );
-    setMevoSignatureSession(null);
-    setSignatureProvider('bird_id');
     setMevoFeedback(null);
     setOpen(true);
   };
@@ -1217,7 +1187,7 @@ const Prescriptions: React.FC = () => {
 
   const persistCurrentPrescription = (): Prescription | null => {
     if (!canPersistPrescription) {
-      alert('Por favor, selecione um paciente e adicione pelo menos um medicamento.');
+      alert('Por favor, selecione um paciente e adicione pelo menos um medicamento ou anexe o PDF da receita.');
       return null;
     }
 
@@ -1366,10 +1336,6 @@ const Prescriptions: React.FC = () => {
     return documentType === 'certificate' ? 'Atestado' : 'Receita';
   };
 
-  const getSignatureProviderLabel = (provider: MevoSignatureProvider) => {
-    return provider === 'bird_id' ? 'Bird ID' : 'Viddas';
-  };
-
   const getGenderLabel = (gender?: string) => {
     if (gender === 'male') return 'Masculino';
     if (gender === 'female') return 'Feminino';
@@ -1394,9 +1360,6 @@ const Prescriptions: React.FC = () => {
     return normalized;
   };
 
-  const getProviderQuickLink = (provider: MevoSignatureProvider) => {
-    return provider === 'bird_id' ? mevoBirdIdUrl : mevoViddasUrl;
-  };
 
   const handleDownloadSelectedPatientCsv = () => {
     if (!selectedPatientForMevo) {
@@ -1445,6 +1408,117 @@ const Prescriptions: React.FC = () => {
     });
   };
 
+  const extractPdfTextLines = async (file: File): Promise<string[]> => {
+    const fileBuffer = await file.arrayBuffer();
+    const pdfjsLib: any = await import('pdfjs-dist/legacy/build/pdf');
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(fileBuffer),
+      disableWorker: true,
+      useWorkerFetch: false,
+      isEvalSupported: false,
+    });
+    const pdf = await loadingTask.promise;
+    const lines: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const rows = new Map<number, Array<{ x: number; text: string }>>();
+
+      (content.items as any[]).forEach((item) => {
+        const text = String(item?.str || '').trim();
+        if (!text) return;
+        const y = Math.round(((item?.transform?.[5] || 0) as number) / 2) * 2;
+        const x = Number(item?.transform?.[4] || 0);
+        if (!rows.has(y)) {
+          rows.set(y, []);
+        }
+        rows.get(y)!.push({ x, text });
+      });
+
+      const orderedRows = Array.from(rows.entries()).sort(
+        (a: [number, Array<{ x: number; text: string }>], b: [number, Array<{ x: number; text: string }>]) =>
+          b[0] - a[0]
+      );
+
+      orderedRows.forEach((entry) => {
+        const rowItems = entry[1];
+        const line = rowItems
+          .sort((a: { x: number }, b: { x: number }) => a.x - b.x)
+          .map((item: { text: string }) => item.text)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (line) {
+          lines.push(line);
+        }
+      });
+    }
+
+    return lines;
+  };
+
+  const extractMedicationFromLine = (line: string, index: number): Medication | null => {
+    const normalized = line.replace(/\s+/g, ' ').trim();
+    if (normalized.length < 6) {
+      return null;
+    }
+
+    const blockedKeywords = /(paciente|prescrição|receita|cid|crm|cpf|nascimento|assinatura|mevo|médico|dr\.?)/i;
+    const dosageRegex = /(\d+(?:[.,]\d+)?\s?(?:mg|g|mcg|µg|ml|mL|ui|UI|%|comprimidos?|cápsulas?|capsulas?|gotas?|ampolas?))/i;
+    const dosageMatch = normalized.match(dosageRegex);
+    if (!dosageMatch) {
+      return null;
+    }
+    if (blockedKeywords.test(normalized) && !/(tomar|uso|a cada|x ao dia|posologia)/i.test(normalized)) {
+      return null;
+    }
+
+    const dosage = dosageMatch[1];
+    const dosageStart = dosageMatch.index ?? 0;
+    const nameCandidate = normalized.slice(0, dosageStart).replace(/[-:–]+$/, '').trim();
+    if (!nameCandidate || nameCandidate.length < 3) {
+      return null;
+    }
+
+    const afterDosage = normalized.slice(dosageStart + dosage.length).trim();
+    const frequencyMatch = normalized.match(
+      /((?:\d+\s*x\s*ao\s*dia)|(?:a\s*cada\s*\d+\s*(?:h|horas?))|(?:\d+\/\d+\s*h)|(?:se\s*necess[aá]rio)|(?:uso\s+[a-zçãõ\s]+))/i
+    );
+    const durationMatch = normalized.match(/((?:por|durante)\s+\d+\s*(?:dias?|semanas?|meses?))/i);
+
+    const frequency = frequencyMatch ? frequencyMatch[1] : 'Conforme receita em PDF';
+    const duration = durationMatch ? durationMatch[1] : 'Conforme receita em PDF';
+    const instructions = afterDosage || normalized;
+
+    return {
+      id: `pdf-med-${Date.now()}-${index}`,
+      name: nameCandidate,
+      dosage,
+      frequency,
+      duration,
+      instructions,
+    };
+  };
+
+  const parseMedicationsFromPdfLines = (lines: string[]): Medication[] => {
+    const parsed = lines
+      .map((line, index) => extractMedicationFromLine(line, index))
+      .filter((item): item is Medication => Boolean(item));
+
+    const seen = new Set<string>();
+    const deduped: Medication[] = [];
+    parsed.forEach((med) => {
+      const key = `${med.name}|${med.dosage}|${med.frequency}|${med.duration}`.toLowerCase();
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      deduped.push(med);
+    });
+    return deduped;
+  };
+
   const handleMevoTokenChange = (token: string) => {
     setCurrentPrescription((prev) => ({
       ...prev,
@@ -1482,20 +1556,31 @@ const Prescriptions: React.FC = () => {
     }
 
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const [dataUrl, lines] = await Promise.all([readFileAsDataUrl(file), extractPdfTextLines(file)]);
+      const extractedMedications = parseMedicationsFromPdfLines(lines);
       setCurrentPrescription((prev) => ({
         ...prev,
+        medications: extractedMedications.length > 0 ? extractedMedications : prev.medications || [],
         mevoDigitalPrescription: {
           ...(prev.mevoDigitalPrescription || {}),
           pdfName: file.name,
           pdfMimeType: file.type || 'application/pdf',
           pdfDataUrl: dataUrl,
           uploadedAt: new Date().toISOString(),
+          extractedMedicationsCount: extractedMedications.length,
+          extractionStatus: extractedMedications.length > 0 ? 'success' : 'failed',
+          extractionMessage:
+            extractedMedications.length > 0
+              ? `${extractedMedications.length} medicamento(s) extraído(s) automaticamente do PDF.`
+              : 'Não foi possível identificar medicamentos no PDF automaticamente.',
         },
       }));
       setMevoFeedback({
-        severity: 'success',
-        message: 'PDF da receita anexado com sucesso à prescrição.',
+        severity: extractedMedications.length > 0 ? 'success' : 'info',
+        message:
+          extractedMedications.length > 0
+            ? `PDF anexado e ${extractedMedications.length} medicamento(s) importado(s) da receita.`
+            : 'PDF anexado com sucesso, mas sem identificação automática de medicamentos.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha ao anexar PDF da receita.';
@@ -1535,6 +1620,9 @@ const Prescriptions: React.FC = () => {
           pdfMimeType: undefined,
           pdfDataUrl: undefined,
           uploadedAt: undefined,
+          extractedMedicationsCount: undefined,
+          extractionStatus: undefined,
+          extractionMessage: undefined,
         },
       };
     });
@@ -1572,14 +1660,6 @@ const Prescriptions: React.FC = () => {
       setMevoFeedback({
         severity: 'info',
         message: 'Selecione a opção "Prescrever com Mevo" para emitir documentos na plataforma Mevo.',
-      });
-      return;
-    }
-
-    if (!mevoSignatureSession?.authenticated) {
-      setMevoFeedback({
-        severity: 'error',
-        message: 'Autentique a assinatura digital (Bird ID ou Viddas) antes de emitir pela Mevo.',
       });
       return;
     }
@@ -1651,36 +1731,6 @@ const Prescriptions: React.FC = () => {
       });
     } finally {
       setMevoSubmittingType(null);
-    }
-  };
-
-  const handleAuthenticateMevoSignature = async (provider: MevoSignatureProvider) => {
-    setIsAuthenticatingSignature(true);
-    setMevoFeedback(null);
-    setSignatureProvider(provider);
-
-    try {
-      const session = await createMevoSignatureSession(provider);
-      setMevoSignatureSession(session);
-      const quickLink = getProviderQuickLink(provider);
-      const authTarget = session.authUrl || quickLink;
-      if (authTarget) {
-        window.open(authTarget, '_blank', 'noopener,noreferrer');
-      }
-
-      setMevoFeedback({
-        severity: session.authenticated ? 'success' : 'error',
-        message: session.message,
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Falha ao autenticar assinatura digital na integração Mevo.';
-      setMevoFeedback({
-        severity: 'error',
-        message,
-      });
-    } finally {
-      setIsAuthenticatingSignature(false);
     }
   };
 
@@ -1792,9 +1842,6 @@ const Prescriptions: React.FC = () => {
                       return;
                     }
                     setPrescriptionChannel(value);
-                    if (value === 'system') {
-                      setMevoSignatureSession(null);
-                    }
                   }}
                   sx={{
                     '& .MuiToggleButton-root': {
@@ -1814,8 +1861,7 @@ const Prescriptions: React.FC = () => {
                     </Alert>
                   ) : (
                     <Alert severity="info">
-                      Para emitir pela Mevo, faça login, autentique Bird ID ou Viddas e use o bloco "Passo 2:
-                      Sistema Mevo".
+                      Para emitir pela Mevo, abra o sistema no bloco abaixo e anexe o PDF/token da receita digital.
                     </Alert>
                   )}
                 </Box>
@@ -1845,108 +1891,7 @@ const Prescriptions: React.FC = () => {
                     }}
                   >
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                      Passo 1: Assinatura digital
-                    </Typography>
-                    <Box display="flex" flexWrap="wrap" gap={1.5} alignItems="center">
-                      <Button
-                        variant="outlined"
-                        startIcon={<OpenInNewIcon />}
-                        disabled={!mevoLoginUrl}
-                        onClick={() => {
-                          if (mevoLoginUrl) {
-                            window.open(mevoLoginUrl, '_blank', 'noopener,noreferrer');
-                          }
-                        }}
-                      >
-                        Entrar na Mevo
-                      </Button>
-                      <Button
-                        onClick={() => handleAuthenticateMevoSignature('bird_id')}
-                        variant="contained"
-                        color="primary"
-                        disabled={isAuthenticatingSignature}
-                        startIcon={isAuthenticatingSignature ? <CircularProgress size={16} /> : undefined}
-                      >
-                        {isAuthenticatingSignature && signatureProvider === 'bird_id'
-                          ? 'Autenticando Bird ID...'
-                          : 'Autenticar Bird ID'}
-                      </Button>
-                      <Button
-                        onClick={() => handleAuthenticateMevoSignature('viddas')}
-                        variant="contained"
-                        color="secondary"
-                        disabled={isAuthenticatingSignature}
-                        startIcon={isAuthenticatingSignature ? <CircularProgress size={16} /> : undefined}
-                      >
-                        {isAuthenticatingSignature && signatureProvider === 'viddas'
-                          ? 'Autenticando Viddas...'
-                          : 'Autenticar Viddas'}
-                      </Button>
-                    </Box>
-
-                    {(!mevoLoginUrl || !mevoBirdIdUrl || !mevoViddasUrl) && (
-                      <Alert severity="warning" sx={{ mt: 2 }}>
-                        Configure as URLs no frontend para habilitar acesso direto:
-                        `REACT_APP_MEVO_LOGIN_URL`, `REACT_APP_MEVO_BIRD_ID_URL`, `REACT_APP_MEVO_VIDDAS_URL`.
-                      </Alert>
-                    )}
-
-                    <Box display="flex" gap={1} mt={1.5} flexWrap="wrap">
-                      <Chip
-                        size="small"
-                        color={mevoLoginUrl ? 'success' : 'default'}
-                        label={`Login Mevo: ${mevoLoginUrl ? 'configurado' : 'não configurado'}`}
-                      />
-                      <Chip
-                        size="small"
-                        color={mevoBirdIdUrl ? 'success' : 'default'}
-                        label={`Bird ID: ${mevoBirdIdUrl ? 'configurado' : 'não configurado'}`}
-                      />
-                      <Chip
-                        size="small"
-                        color={mevoViddasUrl ? 'success' : 'default'}
-                        label={`Viddas: ${mevoViddasUrl ? 'configurado' : 'não configurado'}`}
-                      />
-                    </Box>
-
-                    {mevoSignatureSession && (
-                      <Alert severity={mevoSignatureSession.authenticated ? 'success' : 'warning'} sx={{ mt: 2 }}>
-                        {mevoSignatureSession.message}
-                        <Typography variant="body2" sx={{ mt: 0.5 }}>
-                          Sessão: {mevoSignatureSession.signatureId}
-                        </Typography>
-                        {!mevoSignatureSession.authenticated && (
-                          <Typography variant="body2">
-                            A autenticação real depende das URLs e credenciais configuradas no backend.
-                          </Typography>
-                        )}
-                      </Alert>
-                    )}
-
-                    {mevoSignatureSession?.authUrl && (
-                      <Button
-                        component="a"
-                        href={mevoSignatureSession.authUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        sx={{ mt: 1 }}
-                        endIcon={<OpenInNewIcon />}
-                      >
-                        Abrir autenticação {getSignatureProviderLabel(mevoSignatureSession.provider)}
-                      </Button>
-                    )}
-                  </Box>
-
-                  <Box
-                    sx={{
-                      border: '1px solid',
-                      borderColor: 'divider',
-                      borderRadius: 1.5,
-                      p: 2,
-                    }}
-                  >
-                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                      Passo 2: Sistema Mevo
+                      Passo 1: Sistema Mevo
                     </Typography>
                     {selectedPatientForMevo ? (
                       <Alert severity="success" sx={{ mb: 2 }}>
@@ -1957,11 +1902,20 @@ const Prescriptions: React.FC = () => {
                         Selecione um paciente para enviar dados de cadastro automaticamente ao abrir o Mevo.
                       </Alert>
                     )}
-                    {!mevoSignatureSession?.authenticated && (
-                      <Alert severity="warning" sx={{ mb: 2 }}>
-                        Primeiro autentique a assinatura digital para liberar emissão na Mevo.
-                      </Alert>
-                    )}
+                    <Box display="flex" gap={1} flexWrap="wrap" sx={{ mb: 1.5 }}>
+                      {mevoLoginUrl && (
+                        <Button
+                          variant="outlined"
+                          startIcon={<OpenInNewIcon />}
+                          onClick={() => window.open(mevoLoginUrl, '_blank', 'noopener,noreferrer')}
+                        >
+                          Login Mevo
+                        </Button>
+                      )}
+                      {!mevoLoginUrl && (
+                        <Chip size="small" color="warning" label="Login Mevo não configurado" />
+                      )}
+                    </Box>
                     {mevoPortalUrl ? (
                       <>
                         <Button
@@ -2003,7 +1957,7 @@ const Prescriptions: React.FC = () => {
                     }}
                   >
                     <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                      Passo 3: Anexar Receita (PDF) e Token Digital
+                      Passo 2: Anexar Receita (PDF) e Token Digital
                     </Typography>
                     <Alert severity="info" sx={{ mb: 2 }}>
                       Salve aqui o PDF da receita emitida na Mevo e o token da receita digital para manter o histórico
@@ -2044,6 +1998,17 @@ const Prescriptions: React.FC = () => {
                           icon={<PictureAsPdfIcon />}
                           label={`PDF anexado: ${currentPrescription.mevoDigitalPrescription.pdfName || 'receita.pdf'}`}
                         />
+                        {typeof currentPrescription.mevoDigitalPrescription.extractedMedicationsCount === 'number' && (
+                          <Chip
+                            size="small"
+                            color={
+                              currentPrescription.mevoDigitalPrescription.extractedMedicationsCount > 0
+                                ? 'success'
+                                : 'warning'
+                            }
+                            label={`Medicamentos extraídos: ${currentPrescription.mevoDigitalPrescription.extractedMedicationsCount}`}
+                          />
+                        )}
                         <Button size="small" startIcon={<FileDownloadIcon />} onClick={handleDownloadMevoPdf}>
                           Baixar PDF
                         </Button>
@@ -2051,6 +2016,16 @@ const Prescriptions: React.FC = () => {
                           Remover PDF
                         </Button>
                       </Box>
+                    )}
+                    {currentPrescription.mevoDigitalPrescription?.extractionMessage && (
+                      <Alert
+                        severity={
+                          currentPrescription.mevoDigitalPrescription.extractionStatus === 'success' ? 'success' : 'info'
+                        }
+                        sx={{ mt: 1.5 }}
+                      >
+                        {currentPrescription.mevoDigitalPrescription.extractionMessage}
+                      </Alert>
                     )}
                   </Box>
                 </Paper>

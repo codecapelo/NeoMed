@@ -32,8 +32,8 @@ import {
   Tooltip,
   Alert,
   CircularProgress,
-  Tabs,
-  Tab,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -65,7 +65,6 @@ interface MedicationCatalogItem extends Medication {
 }
 
 type PrescriptionChannel = 'system' | 'mevo';
-type MevoWorkspaceTab = 'signature' | 'portal';
 
 // Catálogo base para seleção rápida de medicamentos no formulário
 const medicationCatalog: MedicationCatalogItem[] = [
@@ -1045,7 +1044,6 @@ const Prescriptions: React.FC = () => {
   const [currentPrescription, setCurrentPrescription] = useState<Partial<Prescription>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [prescriptionChannel, setPrescriptionChannel] = useState<PrescriptionChannel>('system');
-  const [mevoWorkspaceTab, setMevoWorkspaceTab] = useState<MevoWorkspaceTab>('signature');
   const [signatureProvider, setSignatureProvider] = useState<MevoSignatureProvider>('bird_id');
   const [mevoSignatureSession, setMevoSignatureSession] = useState<MevoSignatureSession | null>(null);
   const [isAuthenticatingSignature, setIsAuthenticatingSignature] = useState(false);
@@ -1120,7 +1118,6 @@ const Prescriptions: React.FC = () => {
     });
     setIsEditing(false);
     setPrescriptionChannel('system');
-    setMevoWorkspaceTab('signature');
     setMevoSignatureSession(null);
     setSignatureProvider('bird_id');
     setMevoFeedback(null);
@@ -1135,7 +1132,6 @@ const Prescriptions: React.FC = () => {
         ? 'mevo'
         : 'system'
     );
-    setMevoWorkspaceTab('signature');
     setMevoSignatureSession(null);
     setSignatureProvider('bird_id');
     setMevoFeedback(null);
@@ -1422,9 +1418,6 @@ const Prescriptions: React.FC = () => {
     try {
       const session = await createMevoSignatureSession(signatureProvider);
       setMevoSignatureSession(session);
-      if (session.embedUrl) {
-        setMevoWorkspaceTab('portal');
-      }
 
       setMevoFeedback({
         severity: session.authenticated ? 'success' : 'info',
@@ -1535,20 +1528,30 @@ const Prescriptions: React.FC = () => {
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
                   Como deseja prescrever?
                 </Typography>
-                <Tabs
+                <ToggleButtonGroup
+                  exclusive
+                  fullWidth
                   value={prescriptionChannel}
-                  onChange={(_, value: PrescriptionChannel) => {
+                  onChange={(_, value: PrescriptionChannel | null) => {
+                    if (!value) {
+                      return;
+                    }
                     setPrescriptionChannel(value);
                     if (value === 'system') {
-                      setMevoWorkspaceTab('signature');
                       setMevoSignatureSession(null);
                     }
                   }}
-                  sx={{ borderBottom: 1, borderColor: 'divider' }}
+                  sx={{
+                    '& .MuiToggleButton-root': {
+                      py: 1.25,
+                      textTransform: 'none',
+                      fontWeight: 600,
+                    },
+                  }}
                 >
-                  <Tab value="system" label="Prescrever no Sistema" />
-                  <Tab value="mevo" label="Prescrever com Mevo" />
-                </Tabs>
+                  <ToggleButton value="system">Prescrição no próprio sistema</ToggleButton>
+                  <ToggleButton value="mevo">Prescrição com Mevo</ToggleButton>
+                </ToggleButtonGroup>
                 <Box mt={2}>
                   {prescriptionChannel === 'system' ? (
                     <Alert severity="info">
@@ -1573,100 +1576,98 @@ const Prescriptions: React.FC = () => {
             {prescriptionChannel === 'mevo' && (
               <Grid sx={{ gridColumn: 'span 12' }}>
                 <Paper variant="outlined" sx={{ p: 2 }}>
-                  <Typography variant="subtitle2">Integração Mevo</Typography>
-                  <Tabs
-                    value={mevoWorkspaceTab}
-                    onChange={(_, value: MevoWorkspaceTab) => setMevoWorkspaceTab(value)}
-                    sx={{ mt: 1, borderBottom: 1, borderColor: 'divider' }}
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+                    Fluxo Mevo
+                  </Typography>
+
+                  <Box
+                    sx={{
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 1.5,
+                      p: 2,
+                      mb: 2,
+                    }}
                   >
-                    <Tab value="signature" label="Assinatura Digital" />
-                    <Tab value="portal" label="Sistema Mevo" />
-                  </Tabs>
-
-                  {mevoWorkspaceTab === 'signature' && (
-                    <Box mt={2}>
-                      <Box display="flex" flexWrap="wrap" gap={1.5} alignItems="center">
-                        <FormControl sx={{ minWidth: 220 }} size="small">
-                          <InputLabel id="signature-provider-label">Provedor de Assinatura</InputLabel>
-                          <Select
-                            labelId="signature-provider-label"
-                            value={signatureProvider}
-                            label="Provedor de Assinatura"
-                            onChange={(event) => {
-                              setSignatureProvider(event.target.value as MevoSignatureProvider);
-                              setMevoSignatureSession(null);
-                            }}
-                          >
-                            <MenuItem value="bird_id">Bird ID</MenuItem>
-                            <MenuItem value="viddas">Viddas</MenuItem>
-                          </Select>
-                        </FormControl>
-
-                        <Button
-                          onClick={handleAuthenticateMevoSignature}
-                          variant="contained"
-                          color="primary"
-                          disabled={isAuthenticatingSignature}
-                          startIcon={isAuthenticatingSignature ? <CircularProgress size={16} /> : undefined}
-                        >
-                          {isAuthenticatingSignature
-                            ? 'Autenticando...'
-                            : `Autenticar com ${getSignatureProviderLabel(signatureProvider)}`}
-                        </Button>
-                      </Box>
-
-                      {mevoSignatureSession && (
-                        <Alert severity={mevoSignatureSession.authenticated ? 'success' : 'info'} sx={{ mt: 2 }}>
-                          {mevoSignatureSession.message}
-                          <Typography variant="body2" sx={{ mt: 0.5 }}>
-                            Sessão: {mevoSignatureSession.signatureId}
-                          </Typography>
-                          <Typography variant="body2">
-                            Modo: {mevoSignatureSession.mode === 'provider' ? 'produção' : 'configuração'}
-                          </Typography>
-                          {mevoSignatureSession.embedUrl && (
-                            <Button
-                              size="small"
-                              sx={{ mt: 1 }}
-                              onClick={() => setMevoWorkspaceTab('portal')}
-                            >
-                              Abrir Sistema Mevo
-                            </Button>
-                          )}
-                        </Alert>
-                      )}
-                    </Box>
-                  )}
-
-                  {mevoWorkspaceTab === 'portal' && (
-                    <Box mt={2}>
-                      {!mevoSignatureSession?.authenticated && (
-                        <Alert severity="warning" sx={{ mb: 2 }}>
-                          Autentique sua assinatura digital antes de usar o portal Mevo.
-                        </Alert>
-                      )}
-                      {mevoEmbedUrl ? (
-                        <Box
-                          component="iframe"
-                          src={mevoEmbedUrl}
-                          title="Sistema Mevo"
-                          sx={{
-                            width: '100%',
-                            minHeight: 420,
-                            border: '1px solid',
-                            borderColor: 'divider',
-                            borderRadius: 1,
-                            bgcolor: 'common.white',
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Passo 1: Assinatura digital
+                    </Typography>
+                    <Box display="flex" flexWrap="wrap" gap={1.5} alignItems="center">
+                      <FormControl sx={{ minWidth: 260 }} size="small">
+                        <InputLabel id="signature-provider-label">Provedor</InputLabel>
+                        <Select
+                          labelId="signature-provider-label"
+                          value={signatureProvider}
+                          label="Provedor"
+                          onChange={(event) => {
+                            setSignatureProvider(event.target.value as MevoSignatureProvider);
+                            setMevoSignatureSession(null);
                           }}
-                        />
-                      ) : (
-                        <Alert severity="info">
-                          URL de portal Mevo não configurada. Defina `REACT_APP_MEVO_EMBED_URL` para exibir o sistema
-                          integrado.
-                        </Alert>
-                      )}
+                        >
+                          <MenuItem value="bird_id">Bird ID</MenuItem>
+                          <MenuItem value="viddas">Viddas</MenuItem>
+                        </Select>
+                      </FormControl>
+
+                      <Button
+                        onClick={handleAuthenticateMevoSignature}
+                        variant="contained"
+                        color="primary"
+                        disabled={isAuthenticatingSignature}
+                        startIcon={isAuthenticatingSignature ? <CircularProgress size={16} /> : undefined}
+                      >
+                        {isAuthenticatingSignature
+                          ? 'Autenticando...'
+                          : `Autenticar com ${getSignatureProviderLabel(signatureProvider)}`}
+                      </Button>
                     </Box>
-                  )}
+
+                    {mevoSignatureSession && (
+                      <Alert severity={mevoSignatureSession.authenticated ? 'success' : 'info'} sx={{ mt: 2 }}>
+                        {mevoSignatureSession.message}
+                        <Typography variant="body2" sx={{ mt: 0.5 }}>
+                          Sessão: {mevoSignatureSession.signatureId}
+                        </Typography>
+                      </Alert>
+                    )}
+                  </Box>
+
+                  <Box
+                    sx={{
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      borderRadius: 1.5,
+                      p: 2,
+                    }}
+                  >
+                    <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                      Passo 2: Sistema Mevo
+                    </Typography>
+                    {!mevoSignatureSession?.authenticated && (
+                      <Alert severity="warning" sx={{ mb: 2 }}>
+                        Primeiro autentique a assinatura digital para liberar emissão na Mevo.
+                      </Alert>
+                    )}
+                    {mevoEmbedUrl ? (
+                      <Box
+                        component="iframe"
+                        src={mevoEmbedUrl}
+                        title="Sistema Mevo"
+                        sx={{
+                          width: '100%',
+                          minHeight: 420,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          borderRadius: 1,
+                          bgcolor: 'common.white',
+                        }}
+                      />
+                    ) : (
+                      <Alert severity="info">
+                        URL do portal Mevo não configurada. Defina `REACT_APP_MEVO_EMBED_URL` para exibir o portal.
+                      </Alert>
+                    )}
+                  </Box>
                 </Paper>
               </Grid>
             )}

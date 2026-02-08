@@ -315,6 +315,46 @@ const loadDataType = async (userId, dataType) => {
 
 const isValidEmail = (email) => /\S+@\S+\.\S+/.test(email);
 const isValidMevoDocumentType = (documentType) => ['prescription', 'certificate'].includes(documentType);
+const isValidMevoSignatureProvider = (provider) => ['bird_id', 'viddas'].includes(provider);
+
+const getMevoSignatureProviderLabel = (provider) => (provider === 'bird_id' ? 'Bird ID' : 'Viddas');
+
+const getMevoSignatureEmbedUrl = (provider) => {
+  if (provider === 'bird_id') {
+    return process.env.MEVO_BIRD_ID_EMBED_URL || process.env.MEVO_SIGNATURE_BIRD_ID_EMBED_URL || '';
+  }
+
+  return process.env.MEVO_VIDDAS_EMBED_URL || process.env.MEVO_SIGNATURE_VIDDAS_EMBED_URL || '';
+};
+
+const getMevoSignatureCallbackUrl = (provider) => {
+  if (provider === 'bird_id') {
+    return process.env.MEVO_BIRD_ID_CALLBACK_URL || process.env.MEVO_SIGNATURE_BIRD_ID_CALLBACK_URL || '';
+  }
+
+  return process.env.MEVO_VIDDAS_CALLBACK_URL || process.env.MEVO_SIGNATURE_VIDDAS_CALLBACK_URL || '';
+};
+
+const createMevoSignatureSession = ({ provider }) => {
+  const embedUrl = getMevoSignatureEmbedUrl(provider) || process.env.MEVO_EMBED_URL || '';
+  const callbackUrl = getMevoSignatureCallbackUrl(provider) || process.env.MEVO_SIGNATURE_CALLBACK_URL || '';
+  const mode = embedUrl ? 'provider' : 'mock';
+  const providerLabel = getMevoSignatureProviderLabel(provider);
+
+  return {
+    provider,
+    authenticated: true,
+    mode,
+    message:
+      mode === 'provider'
+        ? `Assinatura digital ${providerLabel} autenticada com sucesso.`
+        : `Sessão de assinatura ${providerLabel} criada em modo configuração (simulado).`,
+    signatureId: `${provider}_${randomUUID()}`,
+    embedUrl: embedUrl || null,
+    callbackUrl: callbackUrl || null,
+    createdAt: new Date().toISOString(),
+  };
+};
 
 const sanitizeMevoDocument = (row) => ({
   id: row.id,
@@ -587,6 +627,26 @@ exports.handler = async (event) => {
       return jsonResponse(200, {
         success: true,
         users: usersResult.rows.map(sanitizeUser),
+      });
+    }
+
+    if (method === 'POST' && path === '/integrations/mevo/signature/session') {
+      const authUser = await requireAuth(event);
+      resolveTargetUserId(authUser, event, body);
+      const provider = String(body.provider || '').trim().toLowerCase();
+
+      if (!isValidMevoSignatureProvider(provider)) {
+        throw appError(
+          400,
+          'integration/mevo-invalid-signature-provider',
+          'provider must be "bird_id" or "viddas".'
+        );
+      }
+
+      const session = createMevoSignatureSession({ provider });
+      return jsonResponse(200, {
+        success: true,
+        session,
       });
     }
 

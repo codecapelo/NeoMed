@@ -2,6 +2,7 @@ import { getAuthHeaders, getApiBaseUrl } from './authService';
 import { Patient, Prescription } from '../types';
 
 export type MevoDocumentType = 'prescription' | 'certificate';
+export type MevoSignatureProvider = 'bird_id' | 'viddas';
 
 export interface MevoDocumentRecord {
   id: string;
@@ -34,6 +35,24 @@ interface EmitMevoDocumentResponse {
   code?: string;
   message?: string;
   document?: MevoDocumentRecord;
+}
+
+export interface MevoSignatureSession {
+  provider: MevoSignatureProvider;
+  authenticated: boolean;
+  mode: 'provider' | 'mock';
+  message: string;
+  signatureId: string;
+  embedUrl: string | null;
+  callbackUrl: string | null;
+  createdAt: string;
+}
+
+interface CreateSignatureSessionResponse {
+  success: boolean;
+  session?: MevoSignatureSession;
+  code?: string;
+  message?: string;
 }
 
 const parseApiError = async (response: Response): Promise<never> => {
@@ -93,4 +112,25 @@ export const listMevoDocuments = async (
 
   const payload = await response.json();
   return Array.isArray(payload.documents) ? (payload.documents as MevoDocumentRecord[]) : [];
+};
+
+export const createMevoSignatureSession = async (
+  provider: MevoSignatureProvider
+): Promise<MevoSignatureSession> => {
+  const response = await fetch(`${getApiBaseUrl()}/api/integrations/mevo/signature/session`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ provider }),
+  });
+
+  if (!response.ok) {
+    await parseApiError(response);
+  }
+
+  const payload = (await response.json()) as CreateSignatureSessionResponse;
+  if (!payload.session) {
+    throw new Error(payload.message || 'A sessão de assinatura digital não foi retornada pela API.');
+  }
+
+  return payload.session;
 };

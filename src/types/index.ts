@@ -33,6 +33,7 @@ export interface Prescription {
   instructions?: string;
   doctorNotes?: string;
   validUntil?: string;
+  prescriptionChannel?: 'system' | 'mevo';
   mevoDocuments?: MevoDocumentStatus[];
 }
 

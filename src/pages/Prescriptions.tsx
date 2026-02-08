@@ -31,7 +31,9 @@ import {
   FormHelperText,
   Tooltip,
   Alert,
-  CircularProgress
+  CircularProgress,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -49,12 +51,21 @@ import {
 import { Prescription, Medication, Patient, MevoDocumentStatus } from '../types';
 import { EnhancedTextField, EnhancedTextArea } from '../components/common';
 import '../styles/PrescriptionPrint.css';
-import { emitMevoDocument, MevoDocumentType } from '../services/mevoService';
+import {
+  emitMevoDocument,
+  MevoDocumentType,
+  createMevoSignatureSession,
+  MevoSignatureProvider,
+  MevoSignatureSession,
+} from '../services/mevoService';
 import { useData } from '../context/DataContext';
 
 interface MedicationCatalogItem extends Medication {
   category: string;
 }
+
+type PrescriptionChannel = 'system' | 'mevo';
+type MevoWorkspaceTab = 'signature' | 'portal';
 
 // Catálogo base para seleção rápida de medicamentos no formulário
 const medicationCatalog: MedicationCatalogItem[] = [
@@ -1033,6 +1044,11 @@ const Prescriptions: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [currentPrescription, setCurrentPrescription] = useState<Partial<Prescription>>({});
   const [isEditing, setIsEditing] = useState(false);
+  const [prescriptionChannel, setPrescriptionChannel] = useState<PrescriptionChannel>('system');
+  const [mevoWorkspaceTab, setMevoWorkspaceTab] = useState<MevoWorkspaceTab>('signature');
+  const [signatureProvider, setSignatureProvider] = useState<MevoSignatureProvider>('bird_id');
+  const [mevoSignatureSession, setMevoSignatureSession] = useState<MevoSignatureSession | null>(null);
+  const [isAuthenticatingSignature, setIsAuthenticatingSignature] = useState(false);
   const [medicationDialogOpen, setMedicationDialogOpen] = useState(false);
   const [currentMedication, setCurrentMedication] = useState<Partial<Medication & { customName?: string }>>({});
   const [editingMedicationIndex, setEditingMedicationIndex] = useState<number | null>(null);
@@ -1042,6 +1058,17 @@ const Prescriptions: React.FC = () => {
     severity: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
+  const mevoEmbedUrl = useMemo(() => {
+    if (mevoSignatureSession?.embedUrl) {
+      return mevoSignatureSession.embedUrl;
+    }
+
+    if (process.env.REACT_APP_MEVO_EMBED_URL) {
+      return process.env.REACT_APP_MEVO_EMBED_URL;
+    }
+
+    return '';
+  }, [mevoSignatureSession?.embedUrl]);
 
   const filteredMedicationCatalog = useMemo(() => {
     const term = medicationSearchTerm.trim().toLowerCase();
@@ -1077,6 +1104,14 @@ const Prescriptions: React.FC = () => {
   const canPersistPrescription = Boolean(
     currentPrescription.patientId && (currentPrescription.medications?.length || 0) > 0
   );
+  const canEmitViaMevo = canPersistPrescription && prescriptionChannel === 'mevo' && !!mevoSignatureSession?.authenticated;
+  const saveButtonLabel = isEditing
+    ? prescriptionChannel === 'mevo'
+      ? 'Atualizar no Sistema'
+      : 'Atualizar Prescrição'
+    : prescriptionChannel === 'mevo'
+    ? 'Salvar no Sistema'
+    : 'Prescrever no Sistema';
 
   const handleClickOpen = () => {
     setCurrentPrescription({
@@ -1084,6 +1119,10 @@ const Prescriptions: React.FC = () => {
       medications: []
     });
     setIsEditing(false);
+    setPrescriptionChannel('system');
+    setMevoWorkspaceTab('signature');
+    setMevoSignatureSession(null);
+    setSignatureProvider('bird_id');
     setMevoFeedback(null);
     setOpen(true);
   };
@@ -1091,6 +1130,14 @@ const Prescriptions: React.FC = () => {
   const handleEdit = (prescription: Prescription) => {
     setCurrentPrescription({ ...prescription });
     setIsEditing(true);
+    setPrescriptionChannel(
+      prescription.prescriptionChannel === 'mevo' || (prescription.mevoDocuments && prescription.mevoDocuments.length > 0)
+        ? 'mevo'
+        : 'system'
+    );
+    setMevoWorkspaceTab('signature');
+    setMevoSignatureSession(null);
+    setSignatureProvider('bird_id');
     setMevoFeedback(null);
     setOpen(true);
   };
@@ -1108,12 +1155,13 @@ const Prescriptions: React.FC = () => {
     let persisted: Prescription;
 
     if (isEditing) {
-      persisted = { ...(currentPrescription as Prescription) };
+      persisted = { ...(currentPrescription as Prescription), prescriptionChannel };
       updatePrescription(persisted.id, persisted);
     } else {
       persisted = {
         ...(currentPrescription as Prescription),
         id: `${Date.now()}`,
+        prescriptionChannel,
         date: currentPrescription.date || new Date().toISOString().split('T')[0],
         validUntil:
           currentPrescription.validUntil ||
@@ -1249,6 +1297,10 @@ const Prescriptions: React.FC = () => {
     return documentType === 'certificate' ? 'Atestado' : 'Receita';
   };
 
+  const getSignatureProviderLabel = (provider: MevoSignatureProvider) => {
+    return provider === 'bird_id' ? 'Bird ID' : 'Viddas';
+  };
+
   const getMevoStatusLabel = (status: string) => {
     if (status === 'emitted') return 'Emitido';
     if (status === 'pending_configuration') return 'Configurar Mevo';
@@ -1277,6 +1329,22 @@ const Prescriptions: React.FC = () => {
   };
 
   const handleEmitWithMevo = async (documentType: MevoDocumentType) => {
+    if (prescriptionChannel !== 'mevo') {
+      setMevoFeedback({
+        severity: 'info',
+        message: 'Selecione a opção "Prescrever com Mevo" para emitir documentos na plataforma Mevo.',
+      });
+      return;
+    }
+
+    if (!mevoSignatureSession?.authenticated) {
+      setMevoFeedback({
+        severity: 'error',
+        message: 'Autentique a assinatura digital (Bird ID ou Viddas) antes de emitir pela Mevo.',
+      });
+      return;
+    }
+
     const persisted = persistCurrentPrescription();
     if (!persisted) {
       return;
@@ -1344,6 +1412,33 @@ const Prescriptions: React.FC = () => {
       });
     } finally {
       setMevoSubmittingType(null);
+    }
+  };
+
+  const handleAuthenticateMevoSignature = async () => {
+    setIsAuthenticatingSignature(true);
+    setMevoFeedback(null);
+
+    try {
+      const session = await createMevoSignatureSession(signatureProvider);
+      setMevoSignatureSession(session);
+      if (session.embedUrl) {
+        setMevoWorkspaceTab('portal');
+      }
+
+      setMevoFeedback({
+        severity: session.authenticated ? 'success' : 'info',
+        message: session.message,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Falha ao autenticar assinatura digital na integração Mevo.';
+      setMevoFeedback({
+        severity: 'error',
+        message,
+      });
+    } finally {
+      setIsAuthenticatingSignature(false);
     }
   };
 
@@ -1436,9 +1531,37 @@ const Prescriptions: React.FC = () => {
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid sx={{ gridColumn: 'span 12' }}>
-              <Alert severity="info">
-                Integração Mevo pronta: use os botões "Emitir Receita Mevo" e "Emitir Atestado Mevo" ao final do formulário.
-              </Alert>
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Como deseja prescrever?
+                </Typography>
+                <Tabs
+                  value={prescriptionChannel}
+                  onChange={(_, value: PrescriptionChannel) => {
+                    setPrescriptionChannel(value);
+                    if (value === 'system') {
+                      setMevoWorkspaceTab('signature');
+                      setMevoSignatureSession(null);
+                    }
+                  }}
+                  sx={{ borderBottom: 1, borderColor: 'divider' }}
+                >
+                  <Tab value="system" label="Prescrever no Sistema" />
+                  <Tab value="mevo" label="Prescrever com Mevo" />
+                </Tabs>
+                <Box mt={2}>
+                  {prescriptionChannel === 'system' ? (
+                    <Alert severity="info">
+                      A prescrição será registrada apenas no NeoMed e poderá ser impressa normalmente.
+                    </Alert>
+                  ) : (
+                    <Alert severity="info">
+                      Para emitir pela Mevo, autentique sua assinatura digital (Bird ID ou Viddas) e acesse a aba
+                      "Sistema Mevo".
+                    </Alert>
+                  )}
+                </Box>
+              </Paper>
             </Grid>
 
             {mevoFeedback && (
@@ -1447,7 +1570,108 @@ const Prescriptions: React.FC = () => {
               </Grid>
             )}
 
-            {!!currentPrescription.mevoDocuments?.length && (
+            {prescriptionChannel === 'mevo' && (
+              <Grid sx={{ gridColumn: 'span 12' }}>
+                <Paper variant="outlined" sx={{ p: 2 }}>
+                  <Typography variant="subtitle2">Integração Mevo</Typography>
+                  <Tabs
+                    value={mevoWorkspaceTab}
+                    onChange={(_, value: MevoWorkspaceTab) => setMevoWorkspaceTab(value)}
+                    sx={{ mt: 1, borderBottom: 1, borderColor: 'divider' }}
+                  >
+                    <Tab value="signature" label="Assinatura Digital" />
+                    <Tab value="portal" label="Sistema Mevo" />
+                  </Tabs>
+
+                  {mevoWorkspaceTab === 'signature' && (
+                    <Box mt={2}>
+                      <Box display="flex" flexWrap="wrap" gap={1.5} alignItems="center">
+                        <FormControl sx={{ minWidth: 220 }} size="small">
+                          <InputLabel id="signature-provider-label">Provedor de Assinatura</InputLabel>
+                          <Select
+                            labelId="signature-provider-label"
+                            value={signatureProvider}
+                            label="Provedor de Assinatura"
+                            onChange={(event) => {
+                              setSignatureProvider(event.target.value as MevoSignatureProvider);
+                              setMevoSignatureSession(null);
+                            }}
+                          >
+                            <MenuItem value="bird_id">Bird ID</MenuItem>
+                            <MenuItem value="viddas">Viddas</MenuItem>
+                          </Select>
+                        </FormControl>
+
+                        <Button
+                          onClick={handleAuthenticateMevoSignature}
+                          variant="contained"
+                          color="primary"
+                          disabled={isAuthenticatingSignature}
+                          startIcon={isAuthenticatingSignature ? <CircularProgress size={16} /> : undefined}
+                        >
+                          {isAuthenticatingSignature
+                            ? 'Autenticando...'
+                            : `Autenticar com ${getSignatureProviderLabel(signatureProvider)}`}
+                        </Button>
+                      </Box>
+
+                      {mevoSignatureSession && (
+                        <Alert severity={mevoSignatureSession.authenticated ? 'success' : 'info'} sx={{ mt: 2 }}>
+                          {mevoSignatureSession.message}
+                          <Typography variant="body2" sx={{ mt: 0.5 }}>
+                            Sessão: {mevoSignatureSession.signatureId}
+                          </Typography>
+                          <Typography variant="body2">
+                            Modo: {mevoSignatureSession.mode === 'provider' ? 'produção' : 'configuração'}
+                          </Typography>
+                          {mevoSignatureSession.embedUrl && (
+                            <Button
+                              size="small"
+                              sx={{ mt: 1 }}
+                              onClick={() => setMevoWorkspaceTab('portal')}
+                            >
+                              Abrir Sistema Mevo
+                            </Button>
+                          )}
+                        </Alert>
+                      )}
+                    </Box>
+                  )}
+
+                  {mevoWorkspaceTab === 'portal' && (
+                    <Box mt={2}>
+                      {!mevoSignatureSession?.authenticated && (
+                        <Alert severity="warning" sx={{ mb: 2 }}>
+                          Autentique sua assinatura digital antes de usar o portal Mevo.
+                        </Alert>
+                      )}
+                      {mevoEmbedUrl ? (
+                        <Box
+                          component="iframe"
+                          src={mevoEmbedUrl}
+                          title="Sistema Mevo"
+                          sx={{
+                            width: '100%',
+                            minHeight: 420,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            borderRadius: 1,
+                            bgcolor: 'common.white',
+                          }}
+                        />
+                      ) : (
+                        <Alert severity="info">
+                          URL de portal Mevo não configurada. Defina `REACT_APP_MEVO_EMBED_URL` para exibir o sistema
+                          integrado.
+                        </Alert>
+                      )}
+                    </Box>
+                  )}
+                </Paper>
+              </Grid>
+            )}
+
+            {prescriptionChannel === 'mevo' && !!currentPrescription.mevoDocuments?.length && (
               <Grid sx={{ gridColumn: 'span 12' }}>
                 <Paper variant="outlined" sx={{ p: 1.5 }}>
                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
@@ -1705,31 +1929,35 @@ const Prescriptions: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={handleClose}>Cancelar</Button>
-          <Button
-            onClick={() => handleEmitWithMevo('prescription')}
-            variant="outlined"
-            color="primary"
-            startIcon={mevoSubmittingType === 'prescription' ? <CircularProgress size={16} /> : <CloudUploadIcon />}
-            disabled={!canPersistPrescription || !!mevoSubmittingType}
-          >
-            Emitir Receita Mevo
-          </Button>
-          <Button
-            onClick={() => handleEmitWithMevo('certificate')}
-            variant="outlined"
-            color="secondary"
-            startIcon={mevoSubmittingType === 'certificate' ? <CircularProgress size={16} /> : <FactCheckIcon />}
-            disabled={!canPersistPrescription || !!mevoSubmittingType}
-          >
-            Emitir Atestado Mevo
-          </Button>
+          {prescriptionChannel === 'mevo' && (
+            <Button
+              onClick={() => handleEmitWithMevo('prescription')}
+              variant="outlined"
+              color="primary"
+              startIcon={mevoSubmittingType === 'prescription' ? <CircularProgress size={16} /> : <CloudUploadIcon />}
+              disabled={!canEmitViaMevo || !!mevoSubmittingType}
+            >
+              Emitir Receita Mevo
+            </Button>
+          )}
+          {prescriptionChannel === 'mevo' && (
+            <Button
+              onClick={() => handleEmitWithMevo('certificate')}
+              variant="outlined"
+              color="secondary"
+              startIcon={mevoSubmittingType === 'certificate' ? <CircularProgress size={16} /> : <FactCheckIcon />}
+              disabled={!canEmitViaMevo || !!mevoSubmittingType}
+            >
+              Emitir Atestado Mevo
+            </Button>
+          )}
           <Button
             onClick={handleSave}
             variant="contained"
             startIcon={<SendIcon />}
             disabled={!canPersistPrescription || !!mevoSubmittingType}
           >
-            {isEditing ? 'Atualizar' : 'Emitir Prescrição'}
+            {saveButtonLabel}
           </Button>
         </DialogActions>
       </Dialog>

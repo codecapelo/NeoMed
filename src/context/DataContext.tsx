@@ -11,6 +11,7 @@ import React, {
 import usePersistentState from '../hooks/usePersistentState';
 import { useAuth } from './AuthContext';
 import { getAuthHeaders, getAuthToken } from '../services/authService';
+import { normalizePhoneWithBrazilCountryCode } from '../utils/phone';
 
 interface Patient {
   id: string;
@@ -118,6 +119,28 @@ const generateId = () => {
   return `${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 };
 
+const normalizePatientPhone = (patient: Patient): Patient => {
+  const safePatient = patient && typeof patient === 'object' ? patient : ({} as Patient);
+  return {
+    ...safePatient,
+    phone: normalizePhoneWithBrazilCountryCode(String(safePatient?.phone || '')),
+  };
+};
+
+const normalizePatients = (items: Patient[]) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  let changed = false;
+  const normalized = safeItems.map((patient) => {
+    const normalizedPatient = normalizePatientPhone(patient);
+    if (normalizedPatient.phone !== String(patient?.phone || '')) {
+      changed = true;
+    }
+    return normalizedPatient;
+  });
+
+  return { normalized, changed };
+};
+
 export function useData() {
   const context = useContext(DataContext);
   if (!context) {
@@ -197,7 +220,9 @@ export function DataProvider({ children }: DataProviderProps) {
           return;
         }
 
-        setPatients(Array.isArray(payload.patients) ? payload.patients : []);
+        const remotePatients = Array.isArray(payload.patients) ? payload.patients : [];
+        const normalizedRemotePatients = normalizePatients(remotePatients).normalized;
+        setPatients(normalizedRemotePatients);
         setPrescriptions(Array.isArray(payload.prescriptions) ? payload.prescriptions : []);
         setAppointments(Array.isArray(payload.appointments) ? payload.appointments : []);
         setMedicalRecords(Array.isArray(payload.medicalRecords) ? payload.medicalRecords : []);
@@ -247,11 +272,19 @@ export function DataProvider({ children }: DataProviderProps) {
     return () => clearTimeout(timeout);
   }, [apiBase, authUserId, isHydratedFromServer, isPatientRole, patients, prescriptions, appointments, medicalRecords]);
 
+  useEffect(() => {
+    const { normalized, changed } = normalizePatients(patients);
+    if (changed) {
+      setPatients(normalized);
+    }
+  }, [patients, setPatients]);
+
   const addPatient = useCallback(
     (patientData: Patient) => {
       const newPatient: Patient = {
         ...patientData,
         id: patientData.id || generateId(),
+        phone: normalizePhoneWithBrazilCountryCode(String(patientData.phone || '')),
       };
       setPatients((prev) => [...prev, newPatient]);
     },
@@ -260,7 +293,8 @@ export function DataProvider({ children }: DataProviderProps) {
 
   const updatePatient = useCallback(
     (updatedPatient: Patient) => {
-      setPatients((prev) => prev.map((patient) => (patient.id === updatedPatient.id ? updatedPatient : patient)));
+      const normalizedPatient = normalizePatientPhone(updatedPatient);
+      setPatients((prev) => prev.map((patient) => (patient.id === normalizedPatient.id ? normalizedPatient : patient)));
     },
     [setPatients]
   );
@@ -384,7 +418,8 @@ export function DataProvider({ children }: DataProviderProps) {
       appointments?: Appointment[];
       medicalRecords?: MedicalRecord[];
     }) => {
-      setPatients(Array.isArray(data.patients) ? data.patients : []);
+      const normalizedPatients = normalizePatients(Array.isArray(data.patients) ? data.patients : []).normalized;
+      setPatients(normalizedPatients);
       setPrescriptions(Array.isArray(data.prescriptions) ? data.prescriptions : []);
       setAppointments(Array.isArray(data.appointments) ? data.appointments : []);
       setMedicalRecords(Array.isArray(data.medicalRecords) ? data.medicalRecords : []);

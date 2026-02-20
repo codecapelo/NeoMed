@@ -392,6 +392,7 @@ const isPatientUser = (user) => String(user?.role || '').toLowerCase() === 'pati
 
 const upsertData = async (userId, dataType, payload) => {
   const db = getPool();
+  const normalizedPayload = dataType === 'patients' ? normalizePatientsPayload(payload) : payload;
   await db.query(
     `
       INSERT INTO neomed_user_data (user_id, data_type, payload, updated_at)
@@ -399,7 +400,7 @@ const upsertData = async (userId, dataType, payload) => {
       ON CONFLICT (user_id, data_type)
       DO UPDATE SET payload = EXCLUDED.payload, updated_at = NOW();
     `,
-    [userId, dataType, JSON.stringify(payload)]
+    [userId, dataType, JSON.stringify(normalizedPayload)]
   );
 };
 
@@ -423,7 +424,7 @@ const loadAllData = async (userId) => {
 
   for (const row of result.rows) {
     if (DATA_TYPES.includes(row.data_type)) {
-      data[row.data_type] = row.payload;
+      data[row.data_type] = row.data_type === 'patients' ? normalizePatientsPayload(row.payload) : row.payload;
     }
   }
 
@@ -443,6 +444,10 @@ const loadDataType = async (userId, dataType) => {
 
   if (!result.rows[0]) {
     return [];
+  }
+
+  if (dataType === 'patients') {
+    return normalizePatientsPayload(result.rows[0].payload);
   }
 
   return result.rows[0].payload;
@@ -742,6 +747,33 @@ const resolveEmergencyRequest = async ({ requestId, resolvedBy }) => {
 
 const isValidEmail = (email) => /\S+@\S+\.\S+/.test(email);
 const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
+const normalizePhoneWithBrazilCountryCode = (value) => {
+  let digits = onlyDigits(value);
+  if (!digits) {
+    return '';
+  }
+
+  if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+  }
+
+  if (digits.startsWith('55')) {
+    if (digits.length === 2) {
+      return '';
+    }
+
+    if (digits.length > 11) {
+      digits = digits.slice(2);
+    }
+  }
+
+  const nationalDigits = digits.slice(0, 11);
+  if (!nationalDigits) {
+    return '';
+  }
+
+  return `+55${nationalDigits}`;
+};
 const isDoctorRole = (role) => ['admin', 'doctor'].includes(String(role || '').toLowerCase());
 const normalizeGender = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -777,7 +809,7 @@ const buildPatientProfileFromPayload = ({ profile, fallbackName, fallbackEmail, 
   const safeProfile = profile && typeof profile === 'object' ? profile : {};
   const dateOfBirth = String(safeProfile.dateOfBirth || safeProfile.birthDate || '').trim();
   const cpf = String(safeProfile.cpf || '').trim();
-  const phone = String(safeProfile.phone || '').trim();
+  const phone = normalizePhoneWithBrazilCountryCode(safeProfile.phone || '');
 
   return {
     id: linkedUserId,
@@ -858,7 +890,7 @@ const buildEmergencyVideoCallUrl = (roomName) => {
 const buildPatientProfileFromEmergencyRequest = ({ request, patientUser, existingProfile }) => {
   const now = new Date().toISOString();
   const mergedDate = existingProfile?.dateOfBirth || existingProfile?.birthDate || '';
-  const mergedPhone = String(existingProfile?.phone || request?.patient_phone || '').trim();
+  const mergedPhone = normalizePhoneWithBrazilCountryCode(existingProfile?.phone || request?.patient_phone || '');
   const mergedEmail = String(existingProfile?.email || request?.patient_email || patientUser?.email || '').trim();
   const mergedName = String(existingProfile?.name || request?.patient_name || patientUser?.name || 'Paciente').trim();
 
@@ -883,6 +915,23 @@ const buildPatientProfileFromEmergencyRequest = ({ request, patientUser, existin
     createdAt: existingProfile?.createdAt || now,
     updatedAt: now,
   };
+};
+
+const normalizePatientsPayload = (payload) => {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload.map((patient) => {
+    if (!patient || typeof patient !== 'object') {
+      return patient;
+    }
+
+    return {
+      ...patient,
+      phone: normalizePhoneWithBrazilCountryCode(patient.phone || ''),
+    };
+  });
 };
 
 const createMevoSignatureSession = ({ provider }) => {

@@ -24,6 +24,7 @@ import * as authService from '../services/authService';
 import type { DoctorSignupOption, PatientSignupProfile, SignupRole } from '../services/authService';
 import logoSvg from '../assets/images/logo-medical.svg';
 import EnhancedTextField from '../components/common/EnhancedTextField';
+import { hasBrazilPhoneDigits, normalizePhoneWithBrazilCountryCode } from '../utils/phone';
 
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 
@@ -58,7 +59,7 @@ const isValidCpf = (value: string) => {
 
 const defaultPatientProfile: PatientSignupProfile = {
   cpf: '',
-  phone: '',
+  phone: '+55',
   dateOfBirth: '',
   gender: 'other',
   address: '',
@@ -177,6 +178,7 @@ export default function Login() {
 
     if (showSignup && accessRole === 'patient') {
       const cpfValue = formatCpf(patientProfile.cpf || '');
+      const normalizedPhone = normalizePhoneWithBrazilCountryCode(patientProfile.phone || '');
 
       if (!cpfValue) {
         setCpfError('CPF e obrigatorio');
@@ -186,8 +188,8 @@ export default function Login() {
         isValid = false;
       }
 
-      if (!patientProfile.phone.trim()) {
-        setPhoneError('Telefone e obrigatorio');
+      if (!hasBrazilPhoneDigits(normalizedPhone)) {
+        setPhoneError('Telefone invalido. Informe DDD + numero.');
         isValid = false;
       }
 
@@ -224,6 +226,7 @@ export default function Login() {
               ? {
                   ...patientProfile,
                   cpf: formatCpf(patientProfile.cpf || ''),
+                  phone: normalizePhoneWithBrazilCountryCode(patientProfile.phone || ''),
                 }
               : undefined,
         });
@@ -412,7 +415,9 @@ export default function Login() {
                     onChange={(event) =>
                       setPatientProfile((prev) => ({
                         ...prev,
-                        phone: event.target.value,
+                        phone: normalizePhoneWithBrazilCountryCode(event.target.value, {
+                          keepPrefixWhenEmpty: true,
+                        }),
                       }))
                     }
                     error={!!phoneError}

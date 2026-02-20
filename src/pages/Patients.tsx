@@ -33,6 +33,7 @@ import { Patient } from '../types';
 import { EnhancedTextField, EnhancedTextArea, CID10Selector } from '../components/common';
 import PatientFilter from '../components/patients/PatientFilter';
 import { useData } from '../context/DataContext';
+import { normalizePhoneWithBrazilCountryCode } from '../utils/phone';
 
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 
@@ -85,6 +86,27 @@ const mapFromContextPatient = (contextPatient: any): Patient => {
   };
 };
 
+const normalizePatientPhone = (patient: Patient): Patient => {
+  const safePatient = patient && typeof patient === 'object' ? patient : ({} as Patient);
+  return {
+    ...safePatient,
+    phone: normalizePhoneWithBrazilCountryCode(String(safePatient.phone || '')),
+  };
+};
+
+const normalizePatientsList = (patientList: Patient[]) => {
+  let changed = false;
+  const normalized = patientList.map((patient) => {
+    const normalizedPatient = normalizePatientPhone(patient);
+    if (normalizedPatient.phone !== String(patient.phone || '')) {
+      changed = true;
+    }
+    return normalizedPatient;
+  });
+
+  return { normalized, changed };
+};
+
 // Dados mockados iniciais para quando não há dados no localStorage
 const initialPatients: Patient[] = [
   {
@@ -94,7 +116,7 @@ const initialPatients: Patient[] = [
     dateOfBirth: '1985-05-15',
     gender: 'male',
     email: 'joao.silva@email.com',
-    phone: '(11) 99999-8888',
+    phone: '+5511999998888',
     address: 'Rua das Flores, 123 - São Paulo, SP',
     healthInsurance: 'Unimed',
     bloodType: 'O+',
@@ -111,7 +133,7 @@ const initialPatients: Patient[] = [
     dateOfBirth: '1990-10-20',
     gender: 'female',
     email: 'maria.oliveira@email.com',
-    phone: '(11) 98888-7777',
+    phone: '+5511988887777',
     address: 'Av. Paulista, 1578 - São Paulo, SP',
     healthInsurance: 'Bradesco Saúde',
     bloodType: 'A+',
@@ -152,7 +174,8 @@ const Patients: React.FC = () => {
           console.log('Usando pacientes do contexto:', contextPatients);
           // Mapear os pacientes do contexto para o formato esperado nesta página
           const mappedPatients = contextPatients.map(mapFromContextPatient);
-          setPatients(mappedPatients as unknown as Patient[]);
+          const { normalized } = normalizePatientsList(mappedPatients as unknown as Patient[]);
+          setPatients(normalized);
         } else {
           // Fallback para localStorage
           console.log('Verificando localStorage para pacientes');
@@ -161,7 +184,12 @@ const Patients: React.FC = () => {
           if (savedPatients) {
             const parsedPatients = JSON.parse(savedPatients);
             console.log('Pacientes carregados do localStorage:', parsedPatients);
-            setPatients(parsedPatients);
+            const safePatients = Array.isArray(parsedPatients) ? parsedPatients : [];
+            const { normalized, changed } = normalizePatientsList(safePatients as Patient[]);
+            setPatients(normalized);
+            if (changed) {
+              localStorage.setItem('patients', JSON.stringify(normalized));
+            }
           } else {
             // Usar dados iniciais mockados
             console.log('Usando dados iniciais mockados de pacientes');
@@ -197,13 +225,18 @@ const Patients: React.FC = () => {
   };
 
   const handleClickOpen = () => {
-    setCurrentPatient({});
+    setCurrentPatient({ phone: '+55' });
     setIsEditing(false);
     setOpen(true);
   };
 
   const handleEdit = (patient: Patient) => {
-    setCurrentPatient({...patient});
+    setCurrentPatient({
+      ...patient,
+      phone: normalizePhoneWithBrazilCountryCode(patient.phone || '', {
+        keepPrefixWhenEmpty: true,
+      }),
+    });
     setIsEditing(true);
     setOpen(true);
   };
@@ -232,7 +265,11 @@ const Patients: React.FC = () => {
 
       if (isEditing && currentPatient.id) {
         // Atualizar paciente existente
-        const contextPatient = mapToContextPatient({ ...(currentPatient as Patient), cpf });
+        const contextPatient = mapToContextPatient({
+          ...(currentPatient as Patient),
+          cpf,
+          phone: normalizePhoneWithBrazilCountryCode(currentPatient.phone || ''),
+        });
         updatePatient(contextPatient);
         showSnackbar('Paciente atualizado com sucesso', 'success');
       } else {
@@ -242,7 +279,7 @@ const Patients: React.FC = () => {
           name: currentPatient.name || '',
           cpf,
           email: currentPatient.email || '',
-          phone: currentPatient.phone || '',
+          phone: normalizePhoneWithBrazilCountryCode(currentPatient.phone || ''),
           dateOfBirth: currentPatient.dateOfBirth || '',
           gender: (currentPatient.gender as 'male' | 'female' | 'other') || 'other',
           address: currentPatient.address || '',
@@ -262,7 +299,8 @@ const Patients: React.FC = () => {
       
       // Atualizar estado local com dados do contexto
       const mappedPatients = contextPatients.map(mapFromContextPatient);
-      setPatients(mappedPatients as unknown as Patient[]);
+      const { normalized } = normalizePatientsList(mappedPatients as unknown as Patient[]);
+      setPatients(normalized);
       setOpen(false);
     } catch (err) {
       const errorMessage = 'Erro ao salvar paciente: ' + (err instanceof Error ? err.message : String(err));
@@ -277,7 +315,8 @@ const Patients: React.FC = () => {
         deletePatient(id);
         // Atualizar estado local com dados do contexto
         const mappedPatients = contextPatients.map(mapFromContextPatient);
-        setPatients(mappedPatients as unknown as Patient[]);
+        const { normalized } = normalizePatientsList(mappedPatients as unknown as Patient[]);
+        setPatients(normalized);
         showSnackbar('Paciente removido com sucesso', 'success');
       } catch (err) {
         const errorMessage = 'Erro ao remover paciente: ' + (err instanceof Error ? err.message : String(err));
@@ -520,7 +559,14 @@ const Patients: React.FC = () => {
                 fullWidth
                 label="Telefone"
                 value={currentPatient.phone || ''}
-                onChange={(e) => setCurrentPatient({...currentPatient, phone: e.target.value})}
+                onChange={(e) =>
+                  setCurrentPatient({
+                    ...currentPatient,
+                    phone: normalizePhoneWithBrazilCountryCode(e.target.value, {
+                      keepPrefixWhenEmpty: true,
+                    }),
+                  })
+                }
               />
             </Grid>
             <Grid item xs={12}>

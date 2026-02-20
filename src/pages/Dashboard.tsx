@@ -247,39 +247,50 @@ const Dashboard: React.FC = () => {
     []
   );
 
-  const startEmergencyVideoCall = useCallback(async (requestId: string) => {
+  const startEmergencyVideoCall = useCallback(async (request: EmergencyRequest) => {
     const token = getAuthToken();
     if (!token) {
       setEmergencyError('Sessao invalida. Faca login novamente.');
       return;
     }
 
+    const requestId = String(request.id || '');
     setStartingVideoRequestId(requestId);
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/doctor/emergency/${requestId}/start-video`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
+      let requestPayload = request;
+
+      if (!request.videoCallUrl) {
+        const response = await fetch(`${getApiBaseUrl()}/api/doctor/emergency/${requestId}/start-video`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || 'Falha ao iniciar videochamada de emergencia.');
+        }
+
+        requestPayload = payload.request as EmergencyRequest;
+      }
+
+      setEmergencyRequests((prev) =>
+        prev.map((item) => (item.id === requestId ? { ...item, ...requestPayload } : item))
+      );
+
+      navigate(`/teleconsulta?mode=emergency&requestId=${encodeURIComponent(requestId)}`, {
+        state: {
+          mode: 'emergency',
+          request: requestPayload,
         },
       });
-
-      const payload = await response.json();
-      if (!response.ok || !payload?.success) {
-        throw new Error(payload?.message || 'Falha ao iniciar videochamada de emergencia.');
-      }
-
-      const request = payload.request as EmergencyRequest;
-      setEmergencyRequests((prev) => prev.map((item) => (item.id === requestId ? { ...item, ...request } : item)));
-
-      if (request?.videoCallUrl) {
-        window.open(String(request.videoCallUrl), '_blank', 'noopener,noreferrer');
-      }
     } catch {
       setEmergencyError('Nao foi possivel iniciar a videochamada agora.');
     } finally {
       setStartingVideoRequestId(null);
     }
-  }, []);
+  }, [navigate]);
 
   const copyEmergencyCallInfo = useCallback(async (request: EmergencyRequest) => {
     const info = [
@@ -514,10 +525,10 @@ const Dashboard: React.FC = () => {
                         size="small"
                         color="error"
                         variant={request.videoCallUrl ? 'outlined' : 'contained'}
-                        onClick={() => startEmergencyVideoCall(request.id)}
+                        onClick={() => startEmergencyVideoCall(request)}
                         disabled={startingVideoRequestId === request.id}
                       >
-                        {startingVideoRequestId === request.id ? 'Iniciando...' : request.videoCallUrl ? 'Abrir video' : 'Videochamada'}
+                        {startingVideoRequestId === request.id ? 'Iniciando...' : 'Video + SOAP'}
                       </Button>
                       {request.videoCallUrl && (
                         <Button

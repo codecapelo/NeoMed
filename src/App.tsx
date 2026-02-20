@@ -19,6 +19,7 @@ const Settings = lazyWithRetry(() => import('./pages/Settings'));
 const Login = lazyWithRetry(() => import('./pages/Login'));
 const AppointmentsPage = lazyWithRetry(() => import('./pages/AppointmentsPage'));
 const PatientPrescriptions = lazyWithRetry(() => import('./pages/PatientPrescriptions'));
+const Teleconsultation = lazyWithRetry(() => import('./pages/Teleconsultation'));
 
 function LoadingScreen() {
   return (
@@ -63,6 +64,7 @@ function App() {
                     <Route path="/prontuarios" element={<MedicalRecords />} />
                     <Route path="/prescricoes" element={<PrescriptionsEntry />} />
                     <Route path="/agendamentos" element={<AppointmentsPage />} />
+                    <Route path="/teleconsulta" element={<Teleconsultation />} />
                     <Route path="/configuracoes" element={<Settings />} />
                   </Route>
                 </Route>

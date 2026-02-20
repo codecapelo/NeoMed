@@ -23,7 +23,8 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
-  Select
+  Select,
+  Stack
 } from '@mui/material';
 import { 
   CalendarMonth, 
@@ -34,13 +35,15 @@ import {
   Delete, 
   Today, 
   Person,
-  Warning
+  Warning,
+  VideoCall
 } from '@mui/icons-material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { LocalizationProvider, DateCalendar, PickersDay, PickersDayProps } from '@mui/x-date-pickers';
 import ptBR from 'date-fns/locale/pt-BR';
 import { endOfWeek, format, isWithinInterval, parseISO, startOfWeek } from 'date-fns';
 import { useData } from '../context/DataContext';
+import { useNavigate } from 'react-router-dom';
 
 // Definindo tipos
 interface AppointmentData {
@@ -52,6 +55,10 @@ interface AppointmentData {
   reason?: string;
   notes?: string;
   patientName?: string;
+  videoCallUrl?: string;
+  videoCallRoom?: string;
+  videoCallAccessCode?: string;
+  videoCallProvider?: string;
 }
 
 interface Reminder {
@@ -81,6 +88,26 @@ const parseAppointmentDate = (value?: string): Date | null => {
   }
 
   return null;
+};
+
+const DEFAULT_VIDEO_BASE = 'https://talky.io';
+const safeSlug = (value: string) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '')
+    .slice(0, 48);
+
+const buildAppointmentVideoCallData = (appointmentId: string) => {
+  const safeId = safeSlug(appointmentId) || Date.now().toString();
+  const room = `neomed-consulta-${safeId}`;
+  const accessCode = safeId.slice(-6).toUpperCase();
+  return {
+    videoCallUrl: `${DEFAULT_VIDEO_BASE}/${encodeURIComponent(room)}`,
+    videoCallRoom: room,
+    videoCallAccessCode: accessCode,
+    videoCallProvider: 'talky',
+  };
 };
 
 const AppointmentCalendarDay = (props: AppointmentCalendarDayProps) => {
@@ -115,6 +142,7 @@ const AppointmentCalendarDay = (props: AppointmentCalendarDayProps) => {
 };
 
 const AppointmentsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { 
     appointments, 
     patients, 
@@ -315,6 +343,33 @@ const AppointmentsPage: React.FC = () => {
     }
   };
 
+  const handleStartVideoConsultation = (appointment: AppointmentData) => {
+    const callData = buildAppointmentVideoCallData(String(appointment.id || ''));
+    const mergedCallData = {
+      videoCallUrl: appointment.videoCallUrl || callData.videoCallUrl,
+      videoCallRoom: appointment.videoCallRoom || callData.videoCallRoom,
+      videoCallAccessCode: appointment.videoCallAccessCode || callData.videoCallAccessCode,
+      videoCallProvider: appointment.videoCallProvider || callData.videoCallProvider,
+    };
+
+    updateAppointment(appointment.id, mergedCallData);
+
+    const params = new URLSearchParams({
+      mode: 'appointment',
+      appointmentId: String(appointment.id || ''),
+    });
+
+    navigate(`/teleconsulta?${params.toString()}`, {
+      state: {
+        mode: 'appointment',
+        appointment: {
+          ...appointment,
+          ...mergedCallData,
+        },
+      },
+    });
+  };
+
   const handleSaveReminder = () => {
     if (!currentReminder.title || !currentReminder.date) {
       alert('Por favor, preencha todos os campos');
@@ -431,32 +486,57 @@ const AppointmentsPage: React.FC = () => {
                 {filteredAppointments.map((appointment, index) => (
                   <React.Fragment key={appointment.id}>
                     {index > 0 && <Divider component="li" />}
-                    <ListItem
-                      secondaryAction={
-                        <Box>
-                          <IconButton edge="end" onClick={() => handleOpenAppointmentDialog(appointment)} sx={{ mr: 1 }}>
-                            <Edit />
-                          </IconButton>
-                          <IconButton edge="end" onClick={() => handleDeleteAppointment(appointment.id)}>
-                            <Delete />
-                          </IconButton>
-                        </Box>
-                      }
-                    >
-                      <ListItemIcon>
+                    <ListItem sx={{ alignItems: 'flex-start', py: 1.25 }}>
+                      <ListItemIcon sx={{ minWidth: 40, mt: 0.25 }}>
                         <Badge color="secondary" variant="dot">
                           <Today />
                         </Badge>
                       </ListItemIcon>
                       <ListItemText
                         primary={
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography variant="body1">{appointment.time}</Typography>
-                            <Typography variant="body1">{appointment.patientName}</Typography>
-                            {getStatusChip(appointment.status)}
-                          </Box>
+                          <Stack spacing={0.6}>
+                            <Stack
+                              direction={{ xs: 'column', sm: 'row' }}
+                              spacing={1}
+                              alignItems={{ xs: 'flex-start', sm: 'center' }}
+                              useFlexGap
+                              flexWrap="wrap"
+                            >
+                              <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                                {appointment.time}
+                              </Typography>
+                              <Typography variant="body1">{appointment.patientName}</Typography>
+                              {getStatusChip(appointment.status)}
+                            </Stack>
+
+                            <Typography variant="body2" color="text.secondary">
+                              {appointment.reason || 'Consulta'}
+                            </Typography>
+
+                            {appointment.notes && (
+                              <Typography variant="caption" color="text.secondary">
+                                {appointment.notes}
+                              </Typography>
+                            )}
+
+                            <Stack direction="row" spacing={0.5} alignItems="center" useFlexGap flexWrap="wrap">
+                              <Button
+                                size="small"
+                                startIcon={<VideoCall />}
+                                variant="outlined"
+                                onClick={() => handleStartVideoConsultation(appointment)}
+                              >
+                                Video + SOAP
+                              </Button>
+                              <IconButton size="small" onClick={() => handleOpenAppointmentDialog(appointment)}>
+                                <Edit fontSize="small" />
+                              </IconButton>
+                              <IconButton size="small" onClick={() => handleDeleteAppointment(appointment.id)}>
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            </Stack>
+                          </Stack>
                         }
-                        secondary={`${appointment.reason || 'Consulta'}${appointment.notes ? ` | ${appointment.notes}` : ''}`}
                       />
                     </ListItem>
                   </React.Fragment>
@@ -480,14 +560,23 @@ const AppointmentsPage: React.FC = () => {
                 {weeklyAppointments.map((appointment, index) => (
                   <React.Fragment key={`week_${appointment.id}`}>
                     {index > 0 && <Divider component="li" />}
-                    <ListItem sx={{ px: 0 }}>
-                      <ListItemText
-                        primary={`${format(parseAppointmentDate(appointment.date) || selectedDate, 'dd/MM')} às ${appointment.time || '--:--'} - ${
-                          appointment.patientName || 'Paciente'
-                        }`}
-                        secondary={`${appointment.reason || 'Consulta'}${appointment.notes ? ` | ${appointment.notes}` : ''}`}
-                      />
-                      <Box>{getStatusChip(appointment.status)}</Box>
+                    <ListItem sx={{ px: 0, alignItems: 'flex-start' }}>
+                      <Box sx={{ width: '100%' }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                          {format(parseAppointmentDate(appointment.date) || selectedDate, 'dd/MM')} às {appointment.time || '--:--'} -{' '}
+                          {appointment.patientName || 'Paciente'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.8 }}>
+                          {appointment.reason || 'Consulta'}
+                          {appointment.notes ? ` | ${appointment.notes}` : ''}
+                        </Typography>
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'flex-start', sm: 'center' }} useFlexGap>
+                        {getStatusChip(appointment.status)}
+                        <Button size="small" variant="outlined" startIcon={<VideoCall />} onClick={() => handleStartVideoConsultation(appointment)}>
+                          Video + SOAP
+                        </Button>
+                        </Stack>
+                      </Box>
                     </ListItem>
                   </React.Fragment>
                 ))}

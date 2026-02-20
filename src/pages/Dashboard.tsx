@@ -31,6 +31,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { getApiBaseUrl, getAuthToken } from '../services/authService';
+import { normalizeVideoCallProvider } from '../utils/videoCall';
 import DashboardCard from '../components/DashboardCard';
 import PatientIcon from '../assets/icons/patient.svg';
 import AppointmentIcon from '../assets/icons/appointment.svg';
@@ -509,7 +510,7 @@ const Dashboard: React.FC = () => {
                         <Stack spacing={0.35} sx={{ mt: 0.6 }}>
                           <Typography variant="caption" color="primary.main" sx={{ display: 'block' }}>
                             Videochamada ativa {request.attendingDoctorName ? `com ${request.attendingDoctorName}` : ''} via{' '}
-                            {request.videoCallProvider || 'video'}.
+                            {normalizeVideoCallProvider(request.videoCallProvider)}.
                           </Typography>
                           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                             Sala: {request.videoCallRoom || '-'} | Codigo: {request.videoCallAccessCode || '-'}

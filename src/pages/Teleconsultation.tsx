@@ -22,6 +22,7 @@ import {
 } from '@mui/icons-material';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useData } from '../context/DataContext';
+import { buildVideoCallUrl, normalizeVideoCallProvider } from '../utils/videoCall';
 
 type TeleMode = 'appointment' | 'emergency';
 
@@ -47,6 +48,7 @@ interface AppointmentState {
   videoCallUrl?: string;
   videoCallRoom?: string;
   videoCallAccessCode?: string;
+  videoCallProvider?: string;
 }
 
 interface TeleconsultationLocationState {
@@ -55,7 +57,6 @@ interface TeleconsultationLocationState {
   appointment?: AppointmentState;
 }
 
-const DEFAULT_VIDEO_BASE = 'https://talky.io';
 const DEFAULT_MEVO_URL = process.env.REACT_APP_MEVO_LOGIN_URL || 'https://receita.mevosaude.com.br';
 const DEFAULT_MEVO_EMBED_URL = process.env.REACT_APP_MEVO_EMBED_URL || '';
 const VIDEO_PANEL_WIDTH = 420;
@@ -79,12 +80,12 @@ const safeSlug = (value: string) =>
 const buildAppointmentCallData = (appointmentId: string) => {
   const room = `neomed-consulta-${safeSlug(appointmentId) || Date.now()}`;
   const accessCode = safeSlug(appointmentId).slice(-6).toUpperCase() || 'ACESSO';
-  const videoCallUrl = `${DEFAULT_VIDEO_BASE}/${encodeURIComponent(room)}`;
+  const videoCallUrl = buildVideoCallUrl(room);
   return {
     videoCallRoom: room,
     videoCallAccessCode: accessCode,
     videoCallUrl,
-    videoCallProvider: 'talky',
+    videoCallProvider: 'twilio',
   };
 };
 
@@ -158,7 +159,7 @@ const Teleconsultation: React.FC = () => {
         videoCallUrl: String(emergencyRequest.videoCallUrl || ''),
         videoCallRoom: String(emergencyRequest.videoCallRoom || ''),
         videoCallAccessCode: String(emergencyRequest.videoCallAccessCode || ''),
-        videoCallProvider: String(emergencyRequest.videoCallProvider || 'talky'),
+        videoCallProvider: normalizeVideoCallProvider(emergencyRequest.videoCallProvider),
       };
     }
 
@@ -168,7 +169,7 @@ const Teleconsultation: React.FC = () => {
         videoCallUrl: String(appointment.videoCallUrl || generated.videoCallUrl),
         videoCallRoom: String(appointment.videoCallRoom || generated.videoCallRoom),
         videoCallAccessCode: String(appointment.videoCallAccessCode || generated.videoCallAccessCode),
-        videoCallProvider: 'talky',
+        videoCallProvider: normalizeVideoCallProvider(appointment.videoCallProvider || generated.videoCallProvider),
       };
     }
 
@@ -176,7 +177,7 @@ const Teleconsultation: React.FC = () => {
       videoCallUrl: '',
       videoCallRoom: '',
       videoCallAccessCode: '',
-      videoCallProvider: 'talky',
+      videoCallProvider: 'twilio',
     };
   }, [appointment, appointmentIdFromRoute, emergencyRequest, mode]);
 
@@ -580,7 +581,7 @@ const Teleconsultation: React.FC = () => {
                 Vídeo da consulta
               </Typography>
             </Stack>
-            <Chip size="small" label={callData.videoCallProvider || 'talky'} />
+            <Chip size="small" label={normalizeVideoCallProvider(callData.videoCallProvider)} />
           </Stack>
 
           <Box

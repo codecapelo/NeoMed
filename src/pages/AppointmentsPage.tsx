@@ -44,6 +44,7 @@ import ptBR from 'date-fns/locale/pt-BR';
 import { endOfWeek, format, isWithinInterval, parseISO, startOfWeek } from 'date-fns';
 import { useData } from '../context/DataContext';
 import { useNavigate } from 'react-router-dom';
+import { buildVideoCallUrl, normalizeVideoCallProvider } from '../utils/videoCall';
 
 // Definindo tipos
 interface AppointmentData {
@@ -90,7 +91,6 @@ const parseAppointmentDate = (value?: string): Date | null => {
   return null;
 };
 
-const DEFAULT_VIDEO_BASE = 'https://talky.io';
 const safeSlug = (value: string) =>
   String(value || '')
     .trim()
@@ -103,10 +103,10 @@ const buildAppointmentVideoCallData = (appointmentId: string) => {
   const room = `neomed-consulta-${safeId}`;
   const accessCode = safeId.slice(-6).toUpperCase();
   return {
-    videoCallUrl: `${DEFAULT_VIDEO_BASE}/${encodeURIComponent(room)}`,
+    videoCallUrl: buildVideoCallUrl(room),
     videoCallRoom: room,
     videoCallAccessCode: accessCode,
-    videoCallProvider: 'talky',
+    videoCallProvider: 'twilio',
   };
 };
 
@@ -349,7 +349,7 @@ const AppointmentsPage: React.FC = () => {
       videoCallUrl: appointment.videoCallUrl || callData.videoCallUrl,
       videoCallRoom: appointment.videoCallRoom || callData.videoCallRoom,
       videoCallAccessCode: appointment.videoCallAccessCode || callData.videoCallAccessCode,
-      videoCallProvider: appointment.videoCallProvider || callData.videoCallProvider,
+      videoCallProvider: normalizeVideoCallProvider(appointment.videoCallProvider || callData.videoCallProvider),
     };
 
     updateAppointment(appointment.id, mergedCallData);

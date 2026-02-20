@@ -24,6 +24,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { getApiBaseUrl, getAuthToken } from '../services/authService';
+import { normalizeVideoCallProvider } from '../utils/videoCall';
 
 type GenericPrescription = {
   id?: string;
@@ -554,7 +555,7 @@ const PatientPrescriptions: React.FC = () => {
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
                         Atendimento iniciado em {formatDateTime(lastEmergencyRequest.videoCallStartedAt)} via{' '}
-                        {lastEmergencyRequest.videoCallProvider || 'videochamada'}.
+                        {normalizeVideoCallProvider(lastEmergencyRequest.videoCallProvider)}.
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
                         Sala: {lastEmergencyRequest.videoCallRoom || '-'} | Codigo: {lastEmergencyRequest.videoCallAccessCode || '-'}

@@ -44,7 +44,7 @@ import ptBR from 'date-fns/locale/pt-BR';
 import { endOfWeek, format, isWithinInterval, parseISO, startOfWeek } from 'date-fns';
 import { useData } from '../context/DataContext';
 import { useNavigate } from 'react-router-dom';
-import { buildVideoCallUrl, normalizeVideoCallProvider } from '../utils/videoCall';
+import { buildVideoCallUrl, normalizeVideoCallProvider, normalizeVideoCallUrl } from '../utils/videoCall';
 
 // Definindo tipos
 interface AppointmentData {
@@ -346,7 +346,10 @@ const AppointmentsPage: React.FC = () => {
   const handleStartVideoConsultation = (appointment: AppointmentData) => {
     const callData = buildAppointmentVideoCallData(String(appointment.id || ''));
     const mergedCallData = {
-      videoCallUrl: appointment.videoCallUrl || callData.videoCallUrl,
+      videoCallUrl: normalizeVideoCallUrl(
+        appointment.videoCallUrl || callData.videoCallUrl,
+        appointment.videoCallRoom || callData.videoCallRoom
+      ),
       videoCallRoom: appointment.videoCallRoom || callData.videoCallRoom,
       videoCallAccessCode: appointment.videoCallAccessCode || callData.videoCallAccessCode,
       videoCallProvider: normalizeVideoCallProvider(appointment.videoCallProvider || callData.videoCallProvider),

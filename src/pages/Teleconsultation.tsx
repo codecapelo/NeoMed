@@ -22,7 +22,7 @@ import {
 } from '@mui/icons-material';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useData } from '../context/DataContext';
-import { buildVideoCallUrl, normalizeVideoCallProvider } from '../utils/videoCall';
+import { buildVideoCallUrl, normalizeVideoCallProvider, normalizeVideoCallUrl } from '../utils/videoCall';
 
 type TeleMode = 'appointment' | 'emergency';
 
@@ -156,7 +156,10 @@ const Teleconsultation: React.FC = () => {
   const callData = useMemo(() => {
     if (mode === 'emergency' && emergencyRequest) {
       return {
-        videoCallUrl: String(emergencyRequest.videoCallUrl || ''),
+        videoCallUrl: normalizeVideoCallUrl(
+          emergencyRequest.videoCallUrl || '',
+          emergencyRequest.videoCallRoom || ''
+        ),
         videoCallRoom: String(emergencyRequest.videoCallRoom || ''),
         videoCallAccessCode: String(emergencyRequest.videoCallAccessCode || ''),
         videoCallProvider: normalizeVideoCallProvider(emergencyRequest.videoCallProvider),
@@ -166,7 +169,10 @@ const Teleconsultation: React.FC = () => {
     if (appointment) {
       const generated = buildAppointmentCallData(String(appointment.id || appointmentIdFromRoute));
       return {
-        videoCallUrl: String(appointment.videoCallUrl || generated.videoCallUrl),
+        videoCallUrl: normalizeVideoCallUrl(
+          appointment.videoCallUrl || generated.videoCallUrl,
+          appointment.videoCallRoom || generated.videoCallRoom
+        ),
         videoCallRoom: String(appointment.videoCallRoom || generated.videoCallRoom),
         videoCallAccessCode: String(appointment.videoCallAccessCode || generated.videoCallAccessCode),
         videoCallProvider: normalizeVideoCallProvider(appointment.videoCallProvider || generated.videoCallProvider),

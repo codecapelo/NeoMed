@@ -58,7 +58,11 @@ Backend (Netlify Function):
 - `NETLIFY_DATABASE_URL` (ou `NETLIFY_DATABASE_URL_UNPOOLED`/`DATABASE_URL`)
 - `JWT_SECRET` (ou `NETLIFY_JWT_SECRET`)
 - `JWT_EXPIRES_IN`
-- `NEOMED_VIDEO_CALL_BASE_URL` (opcional, padrão: `https://twilio-video-demo-app.vercel.app/?roomName={room}`)
+- `NEOMED_VIDEO_CALL_BASE_URL` (opcional, padrão: `/twilio-video-embed.html?roomName={room}`)
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_API_KEY_SID`
+- `TWILIO_API_KEY_SECRET`
+- `TWILIO_VIDEO_TOKEN_TTL_SECONDS` (opcional)
 
 Mevo:
 - `MEVO_API_URL` (ou `MEVO_BASE_URL`)
@@ -76,7 +80,7 @@ Frontend (`app_neomed/.env.local`):
 - `REACT_APP_MEVO_EMBED_URL`
 - `REACT_APP_MEVO_BIRD_ID_URL`
 - `REACT_APP_MEVO_VIDDAS_URL`
-- `REACT_APP_TWILIO_VIDEO_BASE_URL` (opcional, padrão: `https://twilio-video-demo-app.vercel.app/?roomName={room}`)
+- `REACT_APP_TWILIO_VIDEO_BASE_URL` (opcional, padrão: `/twilio-video-embed.html?roomName={room}`)
 - `REACT_APP_VIDEO_CALL_BASE_URL` (alias opcional de compatibilidade)
 
 ## Observações

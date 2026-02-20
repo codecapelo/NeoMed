@@ -31,7 +31,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { getApiBaseUrl, getAuthToken } from '../services/authService';
-import { normalizeVideoCallProvider } from '../utils/videoCall';
+import { normalizeVideoCallProvider, normalizeVideoCallUrl } from '../utils/videoCall';
 import DashboardCard from '../components/DashboardCard';
 import PatientIcon from '../assets/icons/patient.svg';
 import AppointmentIcon from '../assets/icons/appointment.svg';
@@ -276,14 +276,19 @@ const Dashboard: React.FC = () => {
         requestPayload = payload.request as EmergencyRequest;
       }
 
+      const normalizedRequestPayload: EmergencyRequest = {
+        ...requestPayload,
+        videoCallUrl: normalizeVideoCallUrl(requestPayload.videoCallUrl || '', requestPayload.videoCallRoom || '') || null,
+      };
+
       setEmergencyRequests((prev) =>
-        prev.map((item) => (item.id === requestId ? { ...item, ...requestPayload } : item))
+        prev.map((item) => (item.id === requestId ? { ...item, ...normalizedRequestPayload } : item))
       );
 
       navigate(`/teleconsulta?mode=emergency&requestId=${encodeURIComponent(requestId)}`, {
         state: {
           mode: 'emergency',
-          request: requestPayload,
+          request: normalizedRequestPayload,
         },
       });
     } catch {
@@ -294,8 +299,9 @@ const Dashboard: React.FC = () => {
   }, [navigate]);
 
   const copyEmergencyCallInfo = useCallback(async (request: EmergencyRequest) => {
+    const normalizedCallUrl = normalizeVideoCallUrl(request.videoCallUrl || '', request.videoCallRoom || '');
     const info = [
-      `Link: ${request.videoCallUrl || '-'}`,
+      `Link: ${normalizedCallUrl || '-'}`,
       `Sala: ${request.videoCallRoom || '-'}`,
       `Codigo: ${request.videoCallAccessCode || '-'}`,
     ].join('\n');

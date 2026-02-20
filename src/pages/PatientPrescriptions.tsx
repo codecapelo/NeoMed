@@ -24,7 +24,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { getApiBaseUrl, getAuthToken } from '../services/authService';
-import { normalizeVideoCallProvider } from '../utils/videoCall';
+import { normalizeVideoCallProvider, normalizeVideoCallUrl } from '../utils/videoCall';
 
 type GenericPrescription = {
   id?: string;
@@ -180,6 +180,11 @@ const PatientPrescriptions: React.FC = () => {
     return combinedAppointments[0] || null;
   }, [combinedAppointments]);
 
+  const emergencyCallUrl = useMemo(
+    () => normalizeVideoCallUrl(lastEmergencyRequest?.videoCallUrl || '', lastEmergencyRequest?.videoCallRoom || ''),
+    [lastEmergencyRequest?.videoCallRoom, lastEmergencyRequest?.videoCallUrl]
+  );
+
   useEffect(() => {
     const now = new Date();
     setAppointmentDate(now.toISOString().slice(0, 10));
@@ -237,14 +242,14 @@ const PatientPrescriptions: React.FC = () => {
   };
 
   const copyEmergencyCallInfo = async () => {
-    if (!lastEmergencyRequest?.videoCallUrl) {
+    if (!emergencyCallUrl) {
       return;
     }
 
     const info = [
-      `Link: ${lastEmergencyRequest.videoCallUrl || '-'}`,
-      `Sala: ${lastEmergencyRequest.videoCallRoom || '-'}`,
-      `Codigo: ${lastEmergencyRequest.videoCallAccessCode || '-'}`,
+      `Link: ${emergencyCallUrl || '-'}`,
+      `Sala: ${lastEmergencyRequest?.videoCallRoom || '-'}`,
+      `Codigo: ${lastEmergencyRequest?.videoCallAccessCode || '-'}`,
     ].join('\n');
 
     try {
@@ -546,7 +551,7 @@ const PatientPrescriptions: React.FC = () => {
                   : ''}
               </Alert>
 
-              {lastEmergencyRequest.status === 'open' && !!lastEmergencyRequest.videoCallUrl && (
+              {lastEmergencyRequest.status === 'open' && !!emergencyCallUrl && (
                 <Paper variant="outlined" sx={{ p: 1.5 }}>
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.2} justifyContent="space-between" alignItems={{ sm: 'center' }}>
                     <Box>
@@ -568,7 +573,7 @@ const PatientPrescriptions: React.FC = () => {
                       <Button
                         variant="contained"
                         color="error"
-                        onClick={() => window.open(String(lastEmergencyRequest.videoCallUrl), '_blank', 'noopener,noreferrer')}
+                        onClick={() => window.open(String(emergencyCallUrl), '_blank', 'noopener,noreferrer')}
                       >
                         Entrar na videochamada
                       </Button>

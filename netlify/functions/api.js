@@ -24,7 +24,7 @@ const DEFAULT_MEVO_BIRD_ID_AUTH_URL =
   'https://birdid-certificadodigital.com.br/?utm_source=birdid&utm_medium=birdid&utm_campaign=birdid&gad_source=1&gad_campaignid=22504060543&gbraid=0AAAAA_fzDabxDstFCrUKb_wWSc7srKVow&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D4V4-EsbBH8bPgzzA49IcrviU-ZDzyjmvcrSoIDca2_OIK2Yj7Zv2EaAmEuEALw_wcB';
 const DEFAULT_MEVO_VIDDAS_AUTH_URL =
   'https://validcertificadora.com.br/pages/certificado-em-nuvem/d36toyotas503341?utm_source=google&utm_medium=cpc&utm_campaign=%5BSearch%5D+%5BBrasil%5D+Certificado+Digital&utm_content=Certificado+Digital&utm_term=b_&gad_source=1&gad_campaignid=22325218706&gbraid=0AAAAADleBNm7VmqWk6O20qYtaRltq0XF_&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D6it02PqENrLEPIoHiQsf5dij4kI8-GWeB6sEWFrsTDJFh_BKlKxUYaAteLEALw_wcB';
-const DEFAULT_VIDEO_CALL_BASE_URL = 'https://twilio-video-demo-app.vercel.app/?roomName={room}';
+const DEFAULT_VIDEO_CALL_BASE_URL = '/twilio-video-embed.html?roomName={room}';
 
 let pool;
 let schemaReadyPromise;
@@ -329,6 +329,71 @@ const signToken = (user) =>
       issuer: 'neomed',
     }
   );
+
+const sanitizeTwilioIdentity = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_.@-]/g, '_')
+    .slice(0, 120);
+
+const sanitizeTwilioRoomName = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .slice(0, 128);
+
+const createTwilioVideoAccessToken = ({ identity, roomName }) => {
+  const accountSid = String(process.env.TWILIO_ACCOUNT_SID || '').trim();
+  const apiKeySid = String(process.env.TWILIO_API_KEY_SID || process.env.TWILIO_API_KEY || '').trim();
+  const apiKeySecret = String(process.env.TWILIO_API_KEY_SECRET || process.env.TWILIO_API_SECRET || '').trim();
+  const ttlRaw = Number(process.env.TWILIO_VIDEO_TOKEN_TTL_SECONDS || 3600);
+  const ttl = Number.isFinite(ttlRaw) ? Math.min(Math.max(ttlRaw, 300), 43200) : 3600;
+
+  if (!accountSid || !apiKeySid || !apiKeySecret) {
+    throw appError(
+      500,
+      'video/twilio-misconfigured',
+      'Twilio não configurado. Defina TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID e TWILIO_API_KEY_SECRET.'
+    );
+  }
+
+  const safeIdentity = sanitizeTwilioIdentity(identity);
+  const safeRoomName = sanitizeTwilioRoomName(roomName);
+  if (!safeIdentity || !safeRoomName) {
+    throw appError(400, 'video/twilio-invalid-params', 'roomName e identity sao obrigatorios para token Twilio.');
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    jti: `${apiKeySid}-${now}-${randomUUID()}`,
+    iss: apiKeySid,
+    sub: accountSid,
+    iat: now,
+    exp: now + ttl,
+    grants: {
+      identity: safeIdentity,
+      video: {
+        room: safeRoomName,
+      },
+    },
+  };
+
+  const token = jwt.sign(payload, apiKeySecret, {
+    algorithm: 'HS256',
+    header: {
+      cty: 'twilio-fpa;v=1',
+      typ: 'JWT',
+      kid: apiKeySid,
+    },
+  });
+
+  return {
+    token,
+    identity: safeIdentity,
+    roomName: safeRoomName,
+    expiresInSeconds: ttl,
+  };
+};
 
 const markUserSeen = async (userId) => {
   const db = getPool();
@@ -890,7 +955,21 @@ const buildEmergencyCallRoom = (requestId) => {
 
 const createEmergencyAccessCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-const isLegacyBrokenTwilioUrl = (value) => /^https:\/\/video\.twilio\.com\//i.test(String(value || '').trim());
+const LEGACY_VIDEO_CALL_HOSTS = new Set(['video.twilio.com', 'twilio-video-demo-app.vercel.app', 'talky.io', 'meet.jit.si']);
+
+const isLegacyBrokenTwilioUrl = (value) => {
+  const rawUrl = String(value || '').trim();
+  if (!rawUrl) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(rawUrl, 'http://localhost');
+    return LEGACY_VIDEO_CALL_HOSTS.has(String(parsed.hostname || '').toLowerCase());
+  } catch {
+    return /^https:\/\/video\.twilio\.com\//i.test(rawUrl);
+  }
+};
 
 const extractRoomFromVideoUrl = (value) => {
   const rawUrl = String(value || '').trim();
@@ -899,7 +978,7 @@ const extractRoomFromVideoUrl = (value) => {
   }
 
   try {
-    const parsed = new URL(rawUrl);
+    const parsed = new URL(rawUrl, 'http://localhost');
     const roomQuery = parsed.searchParams.get('roomName');
     if (roomQuery) {
       return roomQuery;
@@ -918,7 +997,7 @@ const buildEmergencyVideoCallUrl = (roomName) => {
   const encodedRoom = encodeURIComponent(safeRoom);
 
   if (!baseUrl) {
-    return `https://twilio-video-demo-app.vercel.app/?roomName=${encodedRoom}`;
+    return `/twilio-video-embed.html?roomName=${encodedRoom}`;
   }
 
   if (baseUrl.includes('{room}') || baseUrl.includes('{identity}')) {
@@ -1335,6 +1414,25 @@ exports.handler = async (event) => {
     if (method === 'POST' && path === '/auth/logout') {
       return jsonResponse(200, {
         success: true,
+      });
+    }
+
+    if (method === 'GET' && path === '/video/twilio/token') {
+      const authUser = await requireAuth(event);
+      const query = event.queryStringParameters || {};
+      const requestedRoomName = String(query.roomName || query.room || '').trim();
+      const requestedIdentity = String(query.identity || '').trim();
+      const fallbackIdentity = String(authUser.name || authUser.email || authUser.id || 'usuario');
+
+      const tokenPayload = createTwilioVideoAccessToken({
+        roomName: requestedRoomName,
+        identity: requestedIdentity || fallbackIdentity,
+      });
+
+      return jsonResponse(200, {
+        success: true,
+        provider: 'twilio',
+        ...tokenPayload,
       });
     }
 

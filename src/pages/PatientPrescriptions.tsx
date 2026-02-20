@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   Chip,
+  IconButton,
   Divider,
   Paper,
   Snackbar,
@@ -19,6 +20,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { useData } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { getApiBaseUrl, getAuthToken } from '../services/authService';
@@ -51,6 +53,8 @@ type EmergencyRequest = {
   videoCallUrl?: string | null;
   videoCallProvider?: string | null;
   videoCallStartedAt?: string | null;
+  videoCallRoom?: string | null;
+  videoCallAccessCode?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -229,6 +233,29 @@ const PatientPrescriptions: React.FC = () => {
 
   const closeToast = () => {
     setToast((prev) => ({ ...prev, open: false }));
+  };
+
+  const copyEmergencyCallInfo = async () => {
+    if (!lastEmergencyRequest?.videoCallUrl) {
+      return;
+    }
+
+    const info = [
+      `Link: ${lastEmergencyRequest.videoCallUrl || '-'}`,
+      `Sala: ${lastEmergencyRequest.videoCallRoom || '-'}`,
+      `Codigo: ${lastEmergencyRequest.videoCallAccessCode || '-'}`,
+    ].join('\n');
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(info);
+        showToast('success', 'Dados da videochamada copiados.');
+      } else {
+        throw new Error('clipboard-nao-disponivel');
+      }
+    } catch {
+      showToast('error', 'Nao foi possivel copiar os dados da videochamada.');
+    }
   };
 
   const handleScheduleAppointment = async () => {
@@ -529,14 +556,22 @@ const PatientPrescriptions: React.FC = () => {
                         Atendimento iniciado em {formatDateTime(lastEmergencyRequest.videoCallStartedAt)} via{' '}
                         {lastEmergencyRequest.videoCallProvider || 'videochamada'}.
                       </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Sala: {lastEmergencyRequest.videoCallRoom || '-'} | Codigo: {lastEmergencyRequest.videoCallAccessCode || '-'}
+                      </Typography>
                     </Box>
-                    <Button
-                      variant="contained"
-                      color="error"
-                      onClick={() => window.open(String(lastEmergencyRequest.videoCallUrl), '_blank', 'noopener,noreferrer')}
-                    >
-                      Entrar na videochamada
-                    </Button>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <IconButton color="primary" onClick={copyEmergencyCallInfo} aria-label="copiar dados da chamada">
+                        <ContentCopyIcon />
+                      </IconButton>
+                      <Button
+                        variant="contained"
+                        color="error"
+                        onClick={() => window.open(String(lastEmergencyRequest.videoCallUrl), '_blank', 'noopener,noreferrer')}
+                      >
+                        Entrar na videochamada
+                      </Button>
+                    </Stack>
                   </Stack>
                 </Paper>
               )}

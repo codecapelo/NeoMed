@@ -24,7 +24,7 @@ const DEFAULT_MEVO_BIRD_ID_AUTH_URL =
   'https://birdid-certificadodigital.com.br/?utm_source=birdid&utm_medium=birdid&utm_campaign=birdid&gad_source=1&gad_campaignid=22504060543&gbraid=0AAAAA_fzDabxDstFCrUKb_wWSc7srKVow&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D4V4-EsbBH8bPgzzA49IcrviU-ZDzyjmvcrSoIDca2_OIK2Yj7Zv2EaAmEuEALw_wcB';
 const DEFAULT_MEVO_VIDDAS_AUTH_URL =
   'https://validcertificadora.com.br/pages/certificado-em-nuvem/d36toyotas503341?utm_source=google&utm_medium=cpc&utm_campaign=%5BSearch%5D+%5BBrasil%5D+Certificado+Digital&utm_content=Certificado+Digital&utm_term=b_&gad_source=1&gad_campaignid=22325218706&gbraid=0AAAAADleBNm7VmqWk6O20qYtaRltq0XF_&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D6it02PqENrLEPIoHiQsf5dij4kI8-GWeB6sEWFrsTDJFh_BKlKxUYaAteLEALw_wcB';
-const DEFAULT_VIDEO_CALL_BASE_URL = 'https://meet.jit.si';
+const DEFAULT_VIDEO_CALL_BASE_URL = 'https://talky.io';
 
 let pool;
 let schemaReadyPromise;
@@ -163,6 +163,12 @@ const ensureSchema = async () => {
 
         ALTER TABLE neomed_emergency_requests
         ADD COLUMN IF NOT EXISTS video_call_started_at TIMESTAMPTZ;
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS video_call_room TEXT;
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS video_call_access_code TEXT;
       `)
       .catch((error) => {
         schemaReadyPromise = null;
@@ -641,6 +647,8 @@ const listActiveEmergencyRequests = async () => {
       videoCallUrl: row.video_call_url || null,
       videoCallProvider: row.video_call_provider || null,
       videoCallStartedAt: row.video_call_started_at || null,
+      videoCallRoom: row.video_call_room || null,
+      videoCallAccessCode: row.video_call_access_code || null,
       message: row.message,
       status: row.status,
       createdAt: row.created_at,
@@ -689,7 +697,9 @@ const startEmergencyVideoCall = async ({ requestId, doctorUser, callUrl }) => {
     throw appError(400, 'doctor/emergency-already-resolved', 'Emergency request is already resolved.');
   }
 
-  const videoCallUrl = String(callUrl || '').trim() || current.video_call_url || buildEmergencyVideoCallUrl(requestId);
+  const roomName = String(current.video_call_room || '').trim() || buildEmergencyCallRoom(requestId);
+  const accessCode = String(current.video_call_access_code || '').trim() || createEmergencyAccessCode();
+  const videoCallUrl = String(callUrl || '').trim() || current.video_call_url || buildEmergencyVideoCallUrl(roomName);
 
   const updateResult = await db.query(
     `
@@ -698,13 +708,15 @@ const startEmergencyVideoCall = async ({ requestId, doctorUser, callUrl }) => {
           attending_doctor_name = $3,
           attending_doctor_email = $4,
           video_call_url = $5,
-          video_call_provider = 'meet',
+          video_call_provider = 'talky',
           video_call_started_at = NOW(),
+          video_call_room = $6,
+          video_call_access_code = $7,
           updated_at = NOW()
       WHERE id = $1
       RETURNING *;
     `,
-    [requestId, doctorUser.id, doctorUser.name || doctorUser.email || 'Medico', doctorUser.email || null, videoCallUrl]
+    [requestId, doctorUser.id, doctorUser.name || doctorUser.email || 'Medico', doctorUser.email || null, videoCallUrl, roomName, accessCode]
   );
 
   return updateResult.rows[0] || null;
@@ -826,19 +838,21 @@ const buildEmergencyCallRoom = (requestId) => {
   return `neomed-emergencia-${safeRequestId || Date.now()}`;
 };
 
-const buildEmergencyVideoCallUrl = (requestId) => {
+const createEmergencyAccessCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+const buildEmergencyVideoCallUrl = (roomName) => {
   const baseUrl = getVideoCallBaseUrl();
-  const roomName = buildEmergencyCallRoom(requestId);
+  const safeRoom = String(roomName || '').trim() || buildEmergencyCallRoom(Date.now());
 
   if (!baseUrl) {
-    return `https://meet.jit.si/${roomName}`;
+    return `https://talky.io/${encodeURIComponent(safeRoom)}`;
   }
 
   if (baseUrl.includes('{room}')) {
-    return baseUrl.replace('{room}', encodeURIComponent(roomName));
+    return baseUrl.replace('{room}', encodeURIComponent(safeRoom));
   }
 
-  return `${baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(roomName)}`;
+  return `${baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(safeRoom)}`;
 };
 
 const buildPatientProfileFromEmergencyRequest = ({ request, patientUser, existingProfile }) => {
@@ -1480,6 +1494,8 @@ exports.handler = async (event) => {
           videoCallUrl: request.video_call_url || null,
           videoCallProvider: request.video_call_provider || null,
           videoCallStartedAt: request.video_call_started_at || null,
+          videoCallRoom: request.video_call_room || null,
+          videoCallAccessCode: request.video_call_access_code || null,
           message: request.message,
           status: request.status,
           createdAt: request.created_at,
@@ -1514,6 +1530,8 @@ exports.handler = async (event) => {
           videoCallUrl: latest.video_call_url || null,
           videoCallProvider: latest.video_call_provider || null,
           videoCallStartedAt: latest.video_call_started_at || null,
+          videoCallRoom: latest.video_call_room || null,
+          videoCallAccessCode: latest.video_call_access_code || null,
           message: latest.message,
           status: latest.status,
           createdAt: latest.created_at,
@@ -1605,6 +1623,8 @@ exports.handler = async (event) => {
           videoCallUrl: started.video_call_url || null,
           videoCallProvider: started.video_call_provider || null,
           videoCallStartedAt: started.video_call_started_at || null,
+          videoCallRoom: started.video_call_room || null,
+          videoCallAccessCode: started.video_call_access_code || null,
           message: started.message,
           status: started.status,
           createdAt: started.created_at,
@@ -1645,6 +1665,8 @@ exports.handler = async (event) => {
           videoCallUrl: resolved.video_call_url || null,
           videoCallProvider: resolved.video_call_provider || null,
           videoCallStartedAt: resolved.video_call_started_at || null,
+          videoCallRoom: resolved.video_call_room || null,
+          videoCallAccessCode: resolved.video_call_access_code || null,
           message: resolved.message,
           status: resolved.status,
           createdAt: resolved.created_at,

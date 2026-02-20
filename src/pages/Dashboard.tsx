@@ -20,6 +20,7 @@ import {
 import {
   ArrowForward as ArrowForwardIcon,
   CalendarMonth as AppointmentMUIcon,
+  ContentCopy as ContentCopyIcon,
   MedicalServices as RecordMUIcon,
   Medication as PrescriptionMUIcon,
   PersonAdd as PatientMUIcon,
@@ -55,6 +56,8 @@ interface EmergencyRequest {
   videoCallUrl?: string | null;
   videoCallProvider?: string | null;
   videoCallStartedAt?: string | null;
+  videoCallRoom?: string | null;
+  videoCallAccessCode?: string | null;
   message: string;
   updatedAt?: string;
 }
@@ -278,6 +281,24 @@ const Dashboard: React.FC = () => {
     }
   }, []);
 
+  const copyEmergencyCallInfo = useCallback(async (request: EmergencyRequest) => {
+    const info = [
+      `Link: ${request.videoCallUrl || '-'}`,
+      `Sala: ${request.videoCallRoom || '-'}`,
+      `Codigo: ${request.videoCallAccessCode || '-'}`,
+    ].join('\n');
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(info);
+      } else {
+        throw new Error('clipboard-nao-disponivel');
+      }
+    } catch {
+      setEmergencyError('Nao foi possivel copiar os dados da videochamada.');
+    }
+  }, []);
+
   const userName = useMemo(() => {
     if (!currentUser || typeof currentUser !== 'object') {
       return 'Usuario';
@@ -474,9 +495,15 @@ const Dashboard: React.FC = () => {
                         {request.message}
                       </Typography>
                       {request.videoCallUrl && (
-                        <Typography variant="caption" color="primary.main" sx={{ display: 'block', mt: 0.5 }}>
-                          Videochamada ativa {request.attendingDoctorName ? `com ${request.attendingDoctorName}` : ''}.
-                        </Typography>
+                        <Stack spacing={0.35} sx={{ mt: 0.6 }}>
+                          <Typography variant="caption" color="primary.main" sx={{ display: 'block' }}>
+                            Videochamada ativa {request.attendingDoctorName ? `com ${request.attendingDoctorName}` : ''} via{' '}
+                            {request.videoCallProvider || 'video'}.
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            Sala: {request.videoCallRoom || '-'} | Codigo: {request.videoCallAccessCode || '-'}
+                          </Typography>
+                        </Stack>
                       )}
                       <Typography variant="caption" color="text.secondary">
                         Atualizado em: {formatLastSeen(request.updatedAt)}
@@ -492,6 +519,16 @@ const Dashboard: React.FC = () => {
                       >
                         {startingVideoRequestId === request.id ? 'Iniciando...' : request.videoCallUrl ? 'Abrir video' : 'Videochamada'}
                       </Button>
+                      {request.videoCallUrl && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<ContentCopyIcon />}
+                          onClick={() => copyEmergencyCallInfo(request)}
+                        >
+                          Copiar dados
+                        </Button>
+                      )}
                       <Button size="small" variant="contained" onClick={() => navigate('/agendamentos')}>
                         Ir para agenda
                       </Button>

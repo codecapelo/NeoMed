@@ -1,4 +1,4 @@
-const DEFAULT_TWILIO_VIDEO_BASE = 'https://video.twilio.com/{room}';
+const DEFAULT_TWILIO_VIDEO_BASE = 'https://twilio-video-demo-app.vercel.app/?roomName={room}';
 
 const LEGACY_PROVIDERS = new Set(['talky', 'meet', 'jitsi']);
 
@@ -20,15 +20,20 @@ export const normalizeVideoCallProvider = (provider?: string | null) => {
 export const buildVideoCallUrl = (roomName: string) => {
   const base = getVideoCallBaseUrl();
   const room = encodeURIComponent(String(roomName || '').trim());
+  if (!room) {
+    return '';
+  }
 
   if (!base) {
-    return `https://video.twilio.com/${room}`;
+    return `https://twilio-video-demo-app.vercel.app/?roomName=${room}`;
   }
 
-  if (base.includes('{room}')) {
-    return base.replace('{room}', room);
+  if (base.includes('{room}') || base.includes('{identity}')) {
+    return base
+      .replace('{room}', room)
+      .replace('{identity}', '');
   }
 
-  const normalizedBase = base.replace(/\/+$/, '');
-  return `${normalizedBase}/${room}`;
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}roomName=${room}`;
 };

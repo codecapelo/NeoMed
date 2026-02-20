@@ -24,7 +24,7 @@ const DEFAULT_MEVO_BIRD_ID_AUTH_URL =
   'https://birdid-certificadodigital.com.br/?utm_source=birdid&utm_medium=birdid&utm_campaign=birdid&gad_source=1&gad_campaignid=22504060543&gbraid=0AAAAA_fzDabxDstFCrUKb_wWSc7srKVow&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D4V4-EsbBH8bPgzzA49IcrviU-ZDzyjmvcrSoIDca2_OIK2Yj7Zv2EaAmEuEALw_wcB';
 const DEFAULT_MEVO_VIDDAS_AUTH_URL =
   'https://validcertificadora.com.br/pages/certificado-em-nuvem/d36toyotas503341?utm_source=google&utm_medium=cpc&utm_campaign=%5BSearch%5D+%5BBrasil%5D+Certificado+Digital&utm_content=Certificado+Digital&utm_term=b_&gad_source=1&gad_campaignid=22325218706&gbraid=0AAAAADleBNm7VmqWk6O20qYtaRltq0XF_&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D6it02PqENrLEPIoHiQsf5dij4kI8-GWeB6sEWFrsTDJFh_BKlKxUYaAteLEALw_wcB';
-const DEFAULT_VIDEO_CALL_BASE_URL = 'https://video.twilio.com/{room}';
+const DEFAULT_VIDEO_CALL_BASE_URL = 'https://twilio-video-demo-app.vercel.app/?roomName={room}';
 
 let pool;
 let schemaReadyPromise;
@@ -649,7 +649,12 @@ const listActiveEmergencyRequests = async () => {
       attendingDoctorId: row.attending_doctor_id || null,
       attendingDoctorName: row.attending_doctor_name || null,
       attendingDoctorEmail: row.attending_doctor_email || null,
-      videoCallUrl: row.video_call_url || null,
+      videoCallUrl:
+        normalizeVideoCallUrl({
+          videoCallUrl: row.video_call_url,
+          roomName: row.video_call_room,
+          provider: row.video_call_provider,
+        }) || null,
       videoCallProvider: normalizeVideoCallProvider(row.video_call_provider),
       videoCallStartedAt: row.video_call_started_at || null,
       videoCallRoom: row.video_call_room || null,
@@ -704,7 +709,13 @@ const startEmergencyVideoCall = async ({ requestId, doctorUser, callUrl }) => {
 
   const roomName = String(current.video_call_room || '').trim() || buildEmergencyCallRoom(requestId);
   const accessCode = String(current.video_call_access_code || '').trim() || createEmergencyAccessCode();
-  const videoCallUrl = String(callUrl || '').trim() || current.video_call_url || buildEmergencyVideoCallUrl(roomName);
+  const persistedVideoCallUrl =
+    normalizeVideoCallUrl({
+      videoCallUrl: current.video_call_url,
+      roomName,
+      provider: current.video_call_provider,
+    }) || '';
+  const videoCallUrl = String(callUrl || '').trim() || persistedVideoCallUrl || buildEmergencyVideoCallUrl(roomName);
 
   const updateResult = await db.query(
     `
@@ -879,20 +890,60 @@ const buildEmergencyCallRoom = (requestId) => {
 
 const createEmergencyAccessCode = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+const isLegacyBrokenTwilioUrl = (value) => /^https:\/\/video\.twilio\.com\//i.test(String(value || '').trim());
+
+const extractRoomFromVideoUrl = (value) => {
+  const rawUrl = String(value || '').trim();
+  if (!rawUrl) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(rawUrl);
+    const roomQuery = parsed.searchParams.get('roomName');
+    if (roomQuery) {
+      return roomQuery;
+    }
+
+    const pathRoom = parsed.pathname.replace(/^\/+/, '').split('/')[0] || '';
+    return decodeURIComponent(pathRoom);
+  } catch {
+    return '';
+  }
+};
+
 const buildEmergencyVideoCallUrl = (roomName) => {
   const baseUrl = getVideoCallBaseUrl();
   const safeRoom = String(roomName || '').trim() || buildEmergencyCallRoom(Date.now());
   const encodedRoom = encodeURIComponent(safeRoom);
 
   if (!baseUrl) {
-    return `https://video.twilio.com/${encodedRoom}`;
+    return `https://twilio-video-demo-app.vercel.app/?roomName=${encodedRoom}`;
   }
 
-  if (baseUrl.includes('{room}')) {
-    return baseUrl.replace('{room}', encodedRoom);
+  if (baseUrl.includes('{room}') || baseUrl.includes('{identity}')) {
+    return baseUrl
+      .replace('{room}', encodedRoom)
+      .replace('{identity}', '');
   }
 
-  return `${baseUrl.replace(/\/+$/, '')}/${encodedRoom}`;
+  const separator = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${separator}roomName=${encodedRoom}`;
+};
+
+const normalizeVideoCallUrl = ({ videoCallUrl, roomName, provider }) => {
+  const normalizedProvider = normalizeVideoCallProvider(provider);
+  const rawUrl = String(videoCallUrl || '').trim();
+  if (!rawUrl) {
+    return '';
+  }
+
+  if (normalizedProvider === 'twilio' && isLegacyBrokenTwilioUrl(rawUrl)) {
+    const extractedRoom = String(roomName || '').trim() || extractRoomFromVideoUrl(rawUrl);
+    return buildEmergencyVideoCallUrl(extractedRoom);
+  }
+
+  return rawUrl;
 };
 
 const buildPatientProfileFromEmergencyRequest = ({ request, patientUser, existingProfile }) => {
@@ -1548,7 +1599,12 @@ exports.handler = async (event) => {
           attendingDoctorId: request.attending_doctor_id || null,
           attendingDoctorName: request.attending_doctor_name || null,
           attendingDoctorEmail: request.attending_doctor_email || null,
-          videoCallUrl: request.video_call_url || null,
+          videoCallUrl:
+            normalizeVideoCallUrl({
+              videoCallUrl: request.video_call_url,
+              roomName: request.video_call_room,
+              provider: request.video_call_provider,
+            }) || null,
           videoCallProvider: normalizeVideoCallProvider(request.video_call_provider),
           videoCallStartedAt: request.video_call_started_at || null,
           videoCallRoom: request.video_call_room || null,
@@ -1584,7 +1640,12 @@ exports.handler = async (event) => {
           attendingDoctorId: latest.attending_doctor_id || null,
           attendingDoctorName: latest.attending_doctor_name || null,
           attendingDoctorEmail: latest.attending_doctor_email || null,
-          videoCallUrl: latest.video_call_url || null,
+          videoCallUrl:
+            normalizeVideoCallUrl({
+              videoCallUrl: latest.video_call_url,
+              roomName: latest.video_call_room,
+              provider: latest.video_call_provider,
+            }) || null,
           videoCallProvider: normalizeVideoCallProvider(latest.video_call_provider),
           videoCallStartedAt: latest.video_call_started_at || null,
           videoCallRoom: latest.video_call_room || null,
@@ -1677,7 +1738,12 @@ exports.handler = async (event) => {
           attendingDoctorId: started.attending_doctor_id || null,
           attendingDoctorName: started.attending_doctor_name || null,
           attendingDoctorEmail: started.attending_doctor_email || null,
-          videoCallUrl: started.video_call_url || null,
+          videoCallUrl:
+            normalizeVideoCallUrl({
+              videoCallUrl: started.video_call_url,
+              roomName: started.video_call_room,
+              provider: started.video_call_provider,
+            }) || null,
           videoCallProvider: normalizeVideoCallProvider(started.video_call_provider),
           videoCallStartedAt: started.video_call_started_at || null,
           videoCallRoom: started.video_call_room || null,
@@ -1719,7 +1785,12 @@ exports.handler = async (event) => {
           attendingDoctorId: resolved.attending_doctor_id || null,
           attendingDoctorName: resolved.attending_doctor_name || null,
           attendingDoctorEmail: resolved.attending_doctor_email || null,
-          videoCallUrl: resolved.video_call_url || null,
+          videoCallUrl:
+            normalizeVideoCallUrl({
+              videoCallUrl: resolved.video_call_url,
+              roomName: resolved.video_call_room,
+              provider: resolved.video_call_provider,
+            }) || null,
           videoCallProvider: normalizeVideoCallProvider(resolved.video_call_provider),
           videoCallStartedAt: resolved.video_call_started_at || null,
           videoCallRoom: resolved.video_call_room || null,

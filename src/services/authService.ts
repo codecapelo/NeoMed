@@ -9,6 +9,32 @@ export interface AuthUser {
   isOnline?: boolean;
 }
 
+export type SignupRole = 'doctor' | 'patient';
+
+export interface DoctorSignupOption {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'doctor';
+}
+
+export interface PatientSignupProfile {
+  cpf: string;
+  phone: string;
+  dateOfBirth: string;
+  gender: 'male' | 'female' | 'other';
+  address?: string;
+  healthInsurance?: string;
+  bloodType?: string;
+  medicalHistory?: string;
+}
+
+export interface SignUpWithEmailOptions {
+  role?: SignupRole;
+  doctorId?: string;
+  patientProfile?: PatientSignupProfile;
+}
+
 interface AuthResponse {
   success: boolean;
   user: AuthUser;
@@ -106,11 +132,35 @@ export const signInWithEmail = async (email: string, password: string): Promise<
 export const signUpWithEmail = async (
   email: string,
   password: string,
-  name: string = ''
+  name: string = '',
+  options: SignUpWithEmailOptions = {}
 ): Promise<AuthUser> => {
-  const payload = await requestAuth('/api/auth/register', { email, password, name });
+  const payload = await requestAuth('/api/auth/register', {
+    email,
+    password,
+    name,
+    role: options.role,
+    doctorId: options.doctorId,
+    patientProfile: options.patientProfile,
+  });
   saveSession(payload.token, payload.user);
   return payload.user;
+};
+
+export const listDoctorsForSignup = async (): Promise<DoctorSignupOption[]> => {
+  const response = await fetch(`${getApiBase()}/api/public/doctors`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    await parseApiError(response);
+  }
+
+  const payload = await response.json();
+  return Array.isArray(payload?.doctors) ? (payload.doctors as DoctorSignupOption[]) : [];
 };
 
 export const signOut = async (): Promise<void> => {

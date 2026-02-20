@@ -45,6 +45,7 @@ interface Appointment {
   date: string;
   time: string;
   status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled';
+  reason?: string;
   notes?: string;
   [key: string]: any;
 }
@@ -153,6 +154,18 @@ export function DataProvider({ children }: DataProviderProps) {
     return null;
   }, [currentUser]);
 
+  const isPatientRole = useMemo(() => {
+    if (!currentUser || typeof currentUser !== 'object') {
+      return false;
+    }
+
+    if ('role' in currentUser) {
+      return String(currentUser.role || '').toLowerCase() === 'patient';
+    }
+
+    return false;
+  }, [currentUser]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -205,7 +218,7 @@ export function DataProvider({ children }: DataProviderProps) {
   }, [apiBase, authUserId, setAppointments, setMedicalRecords, setPatients, setPrescriptions]);
 
   useEffect(() => {
-    if (!isHydratedFromServer || !authUserId) {
+    if (!isHydratedFromServer || !authUserId || isPatientRole) {
       return;
     }
 
@@ -232,7 +245,7 @@ export function DataProvider({ children }: DataProviderProps) {
     }, 700);
 
     return () => clearTimeout(timeout);
-  }, [apiBase, authUserId, isHydratedFromServer, patients, prescriptions, appointments, medicalRecords]);
+  }, [apiBase, authUserId, isHydratedFromServer, isPatientRole, patients, prescriptions, appointments, medicalRecords]);
 
   const addPatient = useCallback(
     (patientData: Patient) => {

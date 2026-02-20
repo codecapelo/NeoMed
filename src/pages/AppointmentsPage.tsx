@@ -37,9 +37,9 @@ import {
   Warning
 } from '@mui/icons-material';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { LocalizationProvider, DateCalendar } from '@mui/x-date-pickers';
+import { LocalizationProvider, DateCalendar, PickersDay, PickersDayProps } from '@mui/x-date-pickers';
 import ptBR from 'date-fns/locale/pt-BR';
-import { format, parseISO } from 'date-fns';
+import { endOfWeek, format, isWithinInterval, parseISO, startOfWeek } from 'date-fns';
 import { useData } from '../context/DataContext';
 
 // Definindo tipos
@@ -49,6 +49,7 @@ interface AppointmentData {
   date: string;
   time: string;
   status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled';
+  reason?: string;
   notes?: string;
   patientName?: string;
 }
@@ -59,6 +60,59 @@ interface Reminder {
   date: Date;
   completed: boolean;
 }
+
+interface AppointmentCalendarDayProps extends PickersDayProps<Date> {
+  highlightedDays?: Set<string>;
+}
+
+const parseAppointmentDate = (value?: string): Date | null => {
+  if (!value) {
+    return null;
+  }
+
+  const parsedIso = parseISO(value);
+  if (!Number.isNaN(parsedIso.getTime())) {
+    return parsedIso;
+  }
+
+  const fallback = new Date(value);
+  if (!Number.isNaN(fallback.getTime())) {
+    return fallback;
+  }
+
+  return null;
+};
+
+const AppointmentCalendarDay = (props: AppointmentCalendarDayProps) => {
+  const { highlightedDays, day, outsideCurrentMonth, ...other } = props;
+  const dayKey = format(day, 'yyyy-MM-dd');
+  const hasAppointments = Boolean(highlightedDays?.has(dayKey));
+
+  return (
+    <PickersDay
+      {...other}
+      day={day}
+      outsideCurrentMonth={outsideCurrentMonth}
+      sx={{
+        ...(hasAppointments
+          ? {
+              border: '1px solid #d14343',
+              backgroundColor: outsideCurrentMonth ? undefined : '#fde7e7',
+              color: outsideCurrentMonth ? undefined : '#a31919',
+              fontWeight: 700,
+              '&:hover': {
+                backgroundColor: outsideCurrentMonth ? undefined : '#f7d2d2',
+              },
+              '&.Mui-selected': {
+                backgroundColor: '#c62828 !important',
+                color: '#fff',
+              },
+            }
+          : {}),
+      }}
+    />
+  );
+};
 
 const AppointmentsPage: React.FC = () => {
   const { 
@@ -136,17 +190,46 @@ const AppointmentsPage: React.FC = () => {
   };
 
   const allAppointmentsWithPatientDetails = getAppointmentsWithPatientDetails();
+  const highlightedAppointmentDays = new Set(
+    allAppointmentsWithPatientDetails
+      .map((appointment) => parseAppointmentDate(appointment.date))
+      .filter((value): value is Date => value instanceof Date)
+      .map((value) => format(value, 'yyyy-MM-dd'))
+  );
+
+  const weekStart = startOfWeek(selectedDate, { weekStartsOn: 1 });
+  const weekEnd = endOfWeek(selectedDate, { weekStartsOn: 1 });
 
   // Filtrar consultas pela data selecionada
   const filteredAppointments = allAppointmentsWithPatientDetails.filter(appointment => {
-    // Comparar apenas o dia, mês e ano
-    const appointmentDate = new Date(appointment.date);
+    const appointmentDate = parseAppointmentDate(appointment.date);
+    if (!appointmentDate) {
+      return false;
+    }
+
     return (
       appointmentDate.getDate() === selectedDate.getDate() &&
       appointmentDate.getMonth() === selectedDate.getMonth() &&
       appointmentDate.getFullYear() === selectedDate.getFullYear()
     );
   });
+
+  const weeklyAppointments = allAppointmentsWithPatientDetails
+    .filter((appointment) => {
+      const appointmentDate = parseAppointmentDate(appointment.date);
+      if (!appointmentDate) {
+        return false;
+      }
+
+      return isWithinInterval(appointmentDate, { start: weekStart, end: weekEnd });
+    })
+    .sort((a, b) => {
+      const aDate = parseAppointmentDate(a.date);
+      const bDate = parseAppointmentDate(b.date);
+      const aValue = aDate ? `${format(aDate, 'yyyy-MM-dd')}T${a.time || '00:00'}` : '';
+      const bValue = bDate ? `${format(bDate, 'yyyy-MM-dd')}T${b.time || '00:00'}` : '';
+      return new Date(aValue).getTime() - new Date(bValue).getTime();
+    });
 
   // Gerar ID único
   const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -165,6 +248,7 @@ const AppointmentsPage: React.FC = () => {
         date: format(selectedDate, 'yyyy-MM-dd'),
         time: '',
         status: 'scheduled',
+        reason: 'Consulta clínica',
         notes: ''
       });
     }
@@ -207,6 +291,7 @@ const AppointmentsPage: React.FC = () => {
         date: currentAppointment.date,
         time: currentAppointment.time,
         status: currentAppointment.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled',
+        reason: currentAppointment.reason,
         notes: currentAppointment.notes
       });
     } else {
@@ -216,6 +301,7 @@ const AppointmentsPage: React.FC = () => {
         date: currentAppointment.date as string,
         time: currentAppointment.time as string,
         status: currentAppointment.status as 'scheduled' | 'confirmed' | 'completed' | 'cancelled',
+        reason: String(currentAppointment.reason || 'Consulta clínica'),
         notes: currentAppointment.notes
       });
     }
@@ -303,7 +389,17 @@ const AppointmentsPage: React.FC = () => {
             <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={ptBR}>
               <DateCalendar 
                 value={selectedDate} 
-                onChange={handleDateChange}
+                onChange={(date) => {
+                  if (date) {
+                    handleDateChange(date);
+                  }
+                }}
+                slots={{ day: AppointmentCalendarDay }}
+                slotProps={{
+                  day: {
+                    highlightedDays: highlightedAppointmentDays,
+                  } as any,
+                }}
                 sx={{ width: '100%' }}
               />
             </LocalizationProvider>
@@ -360,7 +456,7 @@ const AppointmentsPage: React.FC = () => {
                             {getStatusChip(appointment.status)}
                           </Box>
                         }
-                        secondary={appointment.notes}
+                        secondary={`${appointment.reason || 'Consulta'}${appointment.notes ? ` | ${appointment.notes}` : ''}`}
                       />
                     </ListItem>
                   </React.Fragment>
@@ -372,6 +468,34 @@ const AppointmentsPage: React.FC = () => {
                   Não há consultas agendadas para esta data
                 </Typography>
               </Box>
+            )}
+
+            <Divider sx={{ my: 2 }} />
+            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>
+              Consultas da semana ({format(weekStart, 'dd/MM')} - {format(weekEnd, 'dd/MM')})
+            </Typography>
+
+            {weeklyAppointments.length > 0 ? (
+              <List dense>
+                {weeklyAppointments.map((appointment, index) => (
+                  <React.Fragment key={`week_${appointment.id}`}>
+                    {index > 0 && <Divider component="li" />}
+                    <ListItem sx={{ px: 0 }}>
+                      <ListItemText
+                        primary={`${format(parseAppointmentDate(appointment.date) || selectedDate, 'dd/MM')} às ${appointment.time || '--:--'} - ${
+                          appointment.patientName || 'Paciente'
+                        }`}
+                        secondary={`${appointment.reason || 'Consulta'}${appointment.notes ? ` | ${appointment.notes}` : ''}`}
+                      />
+                      <Box>{getStatusChip(appointment.status)}</Box>
+                    </ListItem>
+                  </React.Fragment>
+                ))}
+              </List>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Nenhuma consulta cadastrada para esta semana.
+              </Typography>
             )}
           </Paper>
         </Grid>
@@ -490,6 +614,15 @@ const AppointmentsPage: React.FC = () => {
                 onChange={(e) => setCurrentAppointment({...currentAppointment, time: e.target.value})}
                 InputLabelProps={{ shrink: true }}
                 inputProps={{ step: 300 }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                label="Motivo da consulta"
+                fullWidth
+                margin="normal"
+                value={currentAppointment.reason || 'Consulta clínica'}
+                onChange={(e) => setCurrentAppointment({ ...currentAppointment, reason: e.target.value })}
               />
             </Grid>
             <Grid item xs={12}>

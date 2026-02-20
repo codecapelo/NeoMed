@@ -6,6 +6,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import Layout from './components/common/Layout';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
 import theme from './theme';
 import lazyWithRetry from './utils/lazyWithRetry';
@@ -17,6 +18,7 @@ const MedicalRecords = lazyWithRetry(() => import('./pages/MedicalRecords'));
 const Settings = lazyWithRetry(() => import('./pages/Settings'));
 const Login = lazyWithRetry(() => import('./pages/Login'));
 const AppointmentsPage = lazyWithRetry(() => import('./pages/AppointmentsPage'));
+const PatientPrescriptions = lazyWithRetry(() => import('./pages/PatientPrescriptions'));
 
 function LoadingScreen() {
   return (
@@ -32,6 +34,15 @@ function LoadingScreen() {
       <CircularProgress size={36} />
     </Box>
   );
+}
+
+function PrescriptionsEntry() {
+  const { currentUser } = useAuth();
+  if (currentUser?.role === 'patient') {
+    return <PatientPrescriptions />;
+  }
+
+  return <Prescriptions />;
 }
 
 function App() {
@@ -50,7 +61,7 @@ function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/pacientes" element={<Patients />} />
                     <Route path="/prontuarios" element={<MedicalRecords />} />
-                    <Route path="/prescricoes" element={<Prescriptions />} />
+                    <Route path="/prescricoes" element={<PrescriptionsEntry />} />
                     <Route path="/agendamentos" element={<AppointmentsPage />} />
                     <Route path="/configuracoes" element={<Settings />} />
                   </Route>

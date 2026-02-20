@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import * as authService from '../services/authService';
 import { AuthUser } from '../services/authService';
+import type { SignUpWithEmailOptions } from '../services/authService';
 
 interface AuthContextType {
   currentUser: AuthUser | null;
@@ -8,7 +9,7 @@ interface AuthContextType {
   error: string | null;
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string, name?: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string, name?: string, options?: SignUpWithEmailOptions) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -98,10 +99,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }
 
-  async function signUpWithEmail(email: string, password: string, name?: string) {
+  async function signUpWithEmail(
+    email: string,
+    password: string,
+    name?: string,
+    options?: SignUpWithEmailOptions
+  ) {
     try {
       setError(null);
-      const user = await authService.signUpWithEmail(email, password, name);
+      const user = await authService.signUpWithEmail(email, password, name, options);
       setCurrentUser(user);
     } catch (authError) {
       handleAuthError(authError);
@@ -143,6 +149,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     if (code.includes('auth/invalid-email')) {
       setError('Email invalido. Verifique o formato informado.');
+      return;
+    }
+
+    if (code.includes('auth/doctor-required')) {
+      setError('Selecione o medico responsavel para concluir o cadastro do paciente.');
+      return;
+    }
+
+    if (code.includes('auth/doctor-not-found')) {
+      setError('Medico selecionado nao encontrado. Atualize a pagina e tente novamente.');
+      return;
+    }
+
+    if (code.includes('auth/invalid-cpf')) {
+      setError('CPF do paciente invalido. Verifique os dados e tente novamente.');
+      return;
+    }
+
+    if (code.includes('auth/invalid-phone')) {
+      setError('Telefone do paciente e obrigatorio.');
+      return;
+    }
+
+    if (code.includes('auth/invalid-date-of-birth')) {
+      setError('Data de nascimento do paciente e obrigatoria.');
       return;
     }
 

@@ -1,38 +1,158 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   CircularProgress,
   Container,
+  FormControl,
+  InputLabel,
   Link as MuiLink,
+  MenuItem,
   Paper,
+  Select,
   Snackbar,
   Stack,
+  ToggleButton,
+  ToggleButtonGroup,
   Typography,
 } from '@mui/material';
 import { Email as EmailIcon } from '@mui/icons-material';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import * as authService from '../services/authService';
+import type { DoctorSignupOption, PatientSignupProfile, SignupRole } from '../services/authService';
 import logoSvg from '../assets/images/logo-medical.svg';
 import EnhancedTextField from '../components/common/EnhancedTextField';
 
+const onlyDigits = (value: string) => value.replace(/\D/g, '');
+
+const formatCpf = (value: string) => {
+  const digits = onlyDigits(value).slice(0, 11);
+  return digits
+    .replace(/^(\d{3})(\d)/, '$1.$2')
+    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1-$2');
+};
+
+const isValidCpf = (value: string) => {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) {
+    return false;
+  }
+
+  const calcDigit = (base: string, factor: number) => {
+    let total = 0;
+    for (const digit of base) {
+      total += Number(digit) * factor;
+      factor -= 1;
+    }
+    const mod = total % 11;
+    return mod < 2 ? 0 : 11 - mod;
+  };
+
+  const digit1 = calcDigit(cpf.slice(0, 9), 10);
+  const digit2 = calcDigit(cpf.slice(0, 10), 11);
+  return digit1 === Number(cpf[9]) && digit2 === Number(cpf[10]);
+};
+
+const defaultPatientProfile: PatientSignupProfile = {
+  cpf: '',
+  phone: '',
+  dateOfBirth: '',
+  gender: 'other',
+  address: '',
+  healthInsurance: '',
+  bloodType: '',
+  medicalHistory: '',
+};
+
 export default function Login() {
   const { signInWithEmail, signUpWithEmail, currentUser, loading, error, clearError } = useAuth();
+
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [showSignup, setShowSignup] = useState(false);
+  const [accessRole, setAccessRole] = useState<SignupRole>('doctor');
+
+  const [doctorOptions, setDoctorOptions] = useState<DoctorSignupOption[]>([]);
+  const [loadingDoctors, setLoadingDoctors] = useState(false);
+  const [doctorLoadError, setDoctorLoadError] = useState('');
+  const [selectedDoctorId, setSelectedDoctorId] = useState('');
+
+  const [patientProfile, setPatientProfile] = useState<PatientSignupProfile>(defaultPatientProfile);
+
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [nameError, setNameError] = useState('');
+  const [cpfError, setCpfError] = useState('');
+  const [phoneError, setPhoneError] = useState('');
+  const [birthDateError, setBirthDateError] = useState('');
+  const [doctorError, setDoctorError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDoctors = async () => {
+      if (!showSignup || accessRole !== 'patient') {
+        return;
+      }
+
+      try {
+        setLoadingDoctors(true);
+        setDoctorLoadError('');
+        const doctors = await authService.listDoctorsForSignup();
+
+        if (cancelled) {
+          return;
+        }
+
+        setDoctorOptions(doctors);
+
+        if (!doctors.length) {
+          setDoctorLoadError('Nenhum medico disponivel para vinculo.');
+          setSelectedDoctorId('');
+          return;
+        }
+
+        setSelectedDoctorId((prev) => {
+          if (prev && doctors.some((doctor) => doctor.id === prev)) {
+            return prev;
+          }
+          return doctors[0].id;
+        });
+      } catch {
+        if (!cancelled) {
+          setDoctorOptions([]);
+          setSelectedDoctorId('');
+          setDoctorLoadError('Nao foi possivel carregar os medicos. Tente novamente em instantes.');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingDoctors(false);
+        }
+      }
+    };
+
+    loadDoctors();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showSignup, accessRole]);
 
   const validateForm = () => {
     let isValid = true;
+
     setEmailError('');
     setPasswordError('');
     setNameError('');
+    setCpfError('');
+    setPhoneError('');
+    setBirthDateError('');
+    setDoctorError('');
 
     if (!email) {
       setEmailError('Email e obrigatorio');
@@ -50,9 +170,36 @@ export default function Login() {
       isValid = false;
     }
 
-    if (showSignup && !name) {
+    if (showSignup && !name.trim()) {
       setNameError('Nome e obrigatorio');
       isValid = false;
+    }
+
+    if (showSignup && accessRole === 'patient') {
+      const cpfValue = formatCpf(patientProfile.cpf || '');
+
+      if (!cpfValue) {
+        setCpfError('CPF e obrigatorio');
+        isValid = false;
+      } else if (!isValidCpf(cpfValue)) {
+        setCpfError('Informe um CPF valido');
+        isValid = false;
+      }
+
+      if (!patientProfile.phone.trim()) {
+        setPhoneError('Telefone e obrigatorio');
+        isValid = false;
+      }
+
+      if (!patientProfile.dateOfBirth) {
+        setBirthDateError('Data de nascimento e obrigatoria');
+        isValid = false;
+      }
+
+      if (!selectedDoctorId) {
+        setDoctorError('Selecione um medico para vincular o cadastro');
+        isValid = false;
+      }
     }
 
     return isValid;
@@ -69,7 +216,17 @@ export default function Login() {
 
     try {
       if (showSignup) {
-        await signUpWithEmail(email, password, name);
+        await signUpWithEmail(email, password, name, {
+          role: accessRole,
+          doctorId: accessRole === 'patient' ? selectedDoctorId : undefined,
+          patientProfile:
+            accessRole === 'patient'
+              ? {
+                  ...patientProfile,
+                  cpf: formatCpf(patientProfile.cpf || ''),
+                }
+              : undefined,
+        });
       } else {
         await signInWithEmail(email, password);
       }
@@ -83,9 +240,18 @@ export default function Login() {
     setEmail('');
     setPassword('');
     setName('');
+    setDoctorOptions([]);
+    setLoadingDoctors(false);
+    setDoctorLoadError('');
+    setSelectedDoctorId('');
+    setPatientProfile(defaultPatientProfile);
     setEmailError('');
     setPasswordError('');
     setNameError('');
+    setCpfError('');
+    setPhoneError('');
+    setBirthDateError('');
+    setDoctorError('');
   };
 
   if (loading) {
@@ -101,7 +267,7 @@ export default function Login() {
   }
 
   return (
-    <Container component="main" maxWidth="xs">
+    <Container component="main" maxWidth="sm">
       <Snackbar
         open={!!error}
         autoHideDuration={6000}
@@ -134,12 +300,42 @@ export default function Login() {
 
           <Typography variant="body2" sx={{ mb: 3, textAlign: 'center' }}>
             {showSignup
-              ? 'Crie sua conta para comecar a usar o sistema'
-              : 'Faca login para acessar o sistema de gerenciamento medico'}
+              ? accessRole === 'patient'
+                ? 'Cadastre-se como paciente e vincule seu medico responsavel'
+                : 'Crie sua conta para comecar a usar o sistema'
+              : accessRole === 'patient'
+              ? 'Acesse como paciente para ver suas prescricoes'
+              : 'Acesse como medico para gerir pacientes e prescricoes'}
           </Typography>
 
           <form onSubmit={handleEmailLogin} style={{ width: '100%' }}>
             <Stack spacing={2} sx={{ width: '100%' }}>
+              <>
+                <Typography variant="subtitle2" color="text.secondary">
+                  Voce e:
+                </Typography>
+                <ToggleButtonGroup
+                  color="primary"
+                  value={accessRole}
+                  exclusive
+                  fullWidth
+                  onChange={(_, value: SignupRole | null) => {
+                    if (!value) {
+                      return;
+                    }
+
+                    setAccessRole(value);
+                    setCpfError('');
+                    setPhoneError('');
+                    setBirthDateError('');
+                    setDoctorError('');
+                  }}
+                >
+                  <ToggleButton value="doctor">Sou medico</ToggleButton>
+                  <ToggleButton value="patient">Sou paciente</ToggleButton>
+                </ToggleButtonGroup>
+              </>
+
               {showSignup && (
                 <EnhancedTextField
                   required
@@ -184,6 +380,124 @@ export default function Login() {
                 helperText={passwordError}
                 disabled={isLoggingIn}
               />
+
+              {showSignup && accessRole === 'patient' && (
+                <>
+                  <EnhancedTextField
+                    required
+                    fullWidth
+                    id="patient-cpf"
+                    label="CPF"
+                    name="patient-cpf"
+                    value={patientProfile.cpf}
+                    onChange={(event) =>
+                      setPatientProfile((prev) => ({
+                        ...prev,
+                        cpf: formatCpf(event.target.value),
+                      }))
+                    }
+                    error={!!cpfError}
+                    helperText={cpfError}
+                    inputProps={{ maxLength: 14 }}
+                    disabled={isLoggingIn}
+                  />
+
+                  <EnhancedTextField
+                    required
+                    fullWidth
+                    id="patient-phone"
+                    label="Telefone"
+                    name="patient-phone"
+                    value={patientProfile.phone}
+                    onChange={(event) =>
+                      setPatientProfile((prev) => ({
+                        ...prev,
+                        phone: event.target.value,
+                      }))
+                    }
+                    error={!!phoneError}
+                    helperText={phoneError}
+                    disabled={isLoggingIn}
+                  />
+
+                  <EnhancedTextField
+                    required
+                    fullWidth
+                    id="patient-date-of-birth"
+                    label="Data de nascimento"
+                    name="patient-date-of-birth"
+                    type="date"
+                    value={patientProfile.dateOfBirth}
+                    onChange={(event) =>
+                      setPatientProfile((prev) => ({
+                        ...prev,
+                        dateOfBirth: event.target.value,
+                      }))
+                    }
+                    error={!!birthDateError}
+                    helperText={birthDateError}
+                    disabled={isLoggingIn}
+                    InputLabelProps={{ shrink: true }}
+                  />
+
+                  <FormControl fullWidth>
+                    <InputLabel id="patient-gender-label">Genero</InputLabel>
+                    <Select
+                      labelId="patient-gender-label"
+                      value={patientProfile.gender}
+                      label="Genero"
+                      onChange={(event) =>
+                        setPatientProfile((prev) => ({
+                          ...prev,
+                          gender: event.target.value as PatientSignupProfile['gender'],
+                        }))
+                      }
+                      disabled={isLoggingIn}
+                    >
+                      <MenuItem value="male">Masculino</MenuItem>
+                      <MenuItem value="female">Feminino</MenuItem>
+                      <MenuItem value="other">Outro</MenuItem>
+                    </Select>
+                  </FormControl>
+
+                  <FormControl fullWidth error={!!doctorError || !!doctorLoadError}>
+                    <InputLabel id="doctor-select-label">Medico responsavel</InputLabel>
+                    <Select
+                      labelId="doctor-select-label"
+                      value={selectedDoctorId}
+                      label="Medico responsavel"
+                      onChange={(event) => setSelectedDoctorId(String(event.target.value || ''))}
+                      disabled={isLoggingIn || loadingDoctors || doctorOptions.length === 0}
+                    >
+                      {doctorOptions.map((doctor) => (
+                        <MenuItem key={doctor.id} value={doctor.id}>
+                          {doctor.name} ({doctor.email})
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    {(doctorError || doctorLoadError) && (
+                      <Typography variant="caption" color="error" sx={{ mt: 0.75, ml: 1.75 }}>
+                        {doctorError || doctorLoadError}
+                      </Typography>
+                    )}
+                  </FormControl>
+
+                  <EnhancedTextField
+                    fullWidth
+                    id="patient-address"
+                    label="Endereco"
+                    name="patient-address"
+                    value={patientProfile.address || ''}
+                    onChange={(event) =>
+                      setPatientProfile((prev) => ({
+                        ...prev,
+                        address: event.target.value,
+                      }))
+                    }
+                    disabled={isLoggingIn}
+                  />
+                </>
+              )}
 
               <Button
                 type="submit"

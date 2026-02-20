@@ -24,6 +24,7 @@ import {
   Medication as PrescriptionMUIcon,
   PersonAdd as PatientMUIcon,
   Groups as GroupsIcon,
+  WarningAmber as WarningAmberIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -44,6 +45,20 @@ interface RegisteredUser {
   lastSeenAt?: string | null;
 }
 
+interface EmergencyRequest {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientEmail?: string;
+  patientPhone?: string;
+  attendingDoctorName?: string | null;
+  videoCallUrl?: string | null;
+  videoCallProvider?: string | null;
+  videoCallStartedAt?: string | null;
+  message: string;
+  updatedAt?: string;
+}
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
@@ -53,8 +68,13 @@ const Dashboard: React.FC = () => {
   const [registeredUsers, setRegisteredUsers] = useState<RegisteredUser[]>([]);
   const [isUsersListLoading, setIsUsersListLoading] = useState(false);
   const [usersListError, setUsersListError] = useState<string | null>(null);
+  const [emergencyRequests, setEmergencyRequests] = useState<EmergencyRequest[]>([]);
+  const [emergencyLoading, setEmergencyLoading] = useState(false);
+  const [emergencyError, setEmergencyError] = useState<string | null>(null);
+  const [startingVideoRequestId, setStartingVideoRequestId] = useState<string | null>(null);
 
   const isAdmin = !!currentUser && typeof currentUser === 'object' && currentUser.role === 'admin';
+  const canViewEmergency = !!currentUser && typeof currentUser === 'object' && ['admin', 'doctor'].includes(String(currentUser.role || ''));
 
   const loadUsersCount = useCallback(async () => {
     if (!isAdmin) {
@@ -140,6 +160,123 @@ const Dashboard: React.FC = () => {
       window.clearInterval(intervalId);
     };
   }, [isAdmin, loadRegisteredUsers, usersDialogOpen]);
+
+  useEffect(() => {
+    if (!isAdmin && usersDialogOpen) {
+      setUsersDialogOpen(false);
+    }
+  }, [isAdmin, usersDialogOpen]);
+
+  const loadEmergencyRequests = useCallback(async () => {
+    if (!canViewEmergency) {
+      setEmergencyRequests([]);
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      setEmergencyError('Sessao invalida. Faca login novamente.');
+      setEmergencyRequests([]);
+      return;
+    }
+
+    setEmergencyLoading(true);
+    setEmergencyError(null);
+
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/doctor/emergency/requests`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha ao carregar emergencias.');
+      }
+
+      const payload = await response.json();
+      setEmergencyRequests(Array.isArray(payload?.requests) ? (payload.requests as EmergencyRequest[]) : []);
+    } catch {
+      setEmergencyError('Erro ao carregar solicitacoes de emergencia.');
+      setEmergencyRequests([]);
+    } finally {
+      setEmergencyLoading(false);
+    }
+  }, [canViewEmergency]);
+
+  useEffect(() => {
+    if (!canViewEmergency) {
+      return;
+    }
+
+    loadEmergencyRequests();
+    const intervalId = window.setInterval(loadEmergencyRequests, 15000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [canViewEmergency, loadEmergencyRequests]);
+
+  const resolveEmergencyRequest = useCallback(
+    async (requestId: string) => {
+      const token = getAuthToken();
+      if (!token) {
+        setEmergencyError('Sessao invalida. Faca login novamente.');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/api/doctor/emergency/${requestId}/resolve`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Falha ao marcar emergencia como atendida.');
+        }
+
+        setEmergencyRequests((prev) => prev.filter((item) => item.id !== requestId));
+      } catch {
+        setEmergencyError('Nao foi possivel atualizar a solicitacao de emergencia.');
+      }
+    },
+    []
+  );
+
+  const startEmergencyVideoCall = useCallback(async (requestId: string) => {
+    const token = getAuthToken();
+    if (!token) {
+      setEmergencyError('Sessao invalida. Faca login novamente.');
+      return;
+    }
+
+    setStartingVideoRequestId(requestId);
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/doctor/emergency/${requestId}/start-video`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.message || 'Falha ao iniciar videochamada de emergencia.');
+      }
+
+      const request = payload.request as EmergencyRequest;
+      setEmergencyRequests((prev) => prev.map((item) => (item.id === requestId ? { ...item, ...request } : item)));
+
+      if (request?.videoCallUrl) {
+        window.open(String(request.videoCallUrl), '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      setEmergencyError('Nao foi possivel iniciar a videochamada agora.');
+    } finally {
+      setStartingVideoRequestId(null);
+    }
+  }, []);
 
   const userName = useMemo(() => {
     if (!currentUser || typeof currentUser !== 'object') {
@@ -298,62 +435,136 @@ const Dashboard: React.FC = () => {
         </Stack>
       </Paper>
 
-      <Dialog open={usersDialogOpen} onClose={() => setUsersDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Usuarios cadastrados</DialogTitle>
-        <DialogContent dividers>
-          <Stack spacing={1}>
-            <Typography variant="body2" color="text.secondary">
-              Total: {registeredUsers.length} | Online agora: {onlineUsersCount}
-            </Typography>
-            <Divider />
-            {isUsersListLoading && (
-              <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-                <CircularProgress size={26} />
-              </Box>
-            )}
-            {!isUsersListLoading && usersListError && <Alert severity="error">{usersListError}</Alert>}
-            {!isUsersListLoading && !usersListError && (
-              <List disablePadding>
-                {registeredUsers.map((user) => (
-                  <ListItem
-                    key={user.uid}
-                    disablePadding
-                    sx={{
-                      py: 1.1,
-                      borderBottom: '1px solid',
-                      borderColor: 'divider',
-                    }}
-                    secondaryAction={
-                      <Chip
-                        size="small"
-                        label={user.isOnline ? 'Online' : 'Offline'}
-                        color={user.isOnline ? 'success' : 'default'}
-                        variant={user.isOnline ? 'filled' : 'outlined'}
-                      />
-                    }
-                  >
-                    <ListItemText
-                      primary={user.email || 'sem email'}
-                      secondary={`Perfil: ${user.role || 'usuario'} | Ultima atividade: ${formatLastSeen(user.lastSeenAt)}`}
-                    />
-                  </ListItem>
-                ))}
-                {registeredUsers.length === 0 && (
-                  <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
-                    Nenhum usuario cadastrado.
-                  </Typography>
-                )}
-              </List>
-            )}
+      {canViewEmergency && (
+        <Paper elevation={0} sx={{ p: 2.5, mb: 2.5, border: '1px solid', borderColor: 'warning.light', backgroundColor: '#fffaf3' }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5} sx={{ mb: 1.5 }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <WarningAmberIcon color="warning" />
+              <Typography variant="h6">Solicitacoes de emergencia (pacientes online)</Typography>
+            </Stack>
+            <Button size="small" onClick={loadEmergencyRequests}>
+              Atualizar
+            </Button>
           </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={loadRegisteredUsers}>Atualizar</Button>
-          <Button onClick={() => setUsersDialogOpen(false)} variant="contained">
-            Fechar
-          </Button>
-        </DialogActions>
-      </Dialog>
+
+          {emergencyLoading && (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 1.5 }}>
+              <CircularProgress size={24} />
+            </Box>
+          )}
+
+          {!emergencyLoading && emergencyError && <Alert severity="error">{emergencyError}</Alert>}
+
+          {!emergencyLoading && !emergencyError && emergencyRequests.length === 0 && (
+            <Typography variant="body2" color="text.secondary">
+              Nenhuma solicitacao de emergencia ativa no momento.
+            </Typography>
+          )}
+
+          {!emergencyLoading && !emergencyError && emergencyRequests.length > 0 && (
+            <Stack spacing={1.2}>
+              {emergencyRequests.map((request) => (
+                <Paper key={request.id} variant="outlined" sx={{ p: 1.5 }}>
+                  <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={1.2}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                        {request.patientName} ({request.patientEmail || 'sem email'})
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {request.message}
+                      </Typography>
+                      {request.videoCallUrl && (
+                        <Typography variant="caption" color="primary.main" sx={{ display: 'block', mt: 0.5 }}>
+                          Videochamada ativa {request.attendingDoctorName ? `com ${request.attendingDoctorName}` : ''}.
+                        </Typography>
+                      )}
+                      <Typography variant="caption" color="text.secondary">
+                        Atualizado em: {formatLastSeen(request.updatedAt)}
+                      </Typography>
+                    </Box>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Button
+                        size="small"
+                        color="error"
+                        variant={request.videoCallUrl ? 'outlined' : 'contained'}
+                        onClick={() => startEmergencyVideoCall(request.id)}
+                        disabled={startingVideoRequestId === request.id}
+                      >
+                        {startingVideoRequestId === request.id ? 'Iniciando...' : request.videoCallUrl ? 'Abrir video' : 'Videochamada'}
+                      </Button>
+                      <Button size="small" variant="contained" onClick={() => navigate('/agendamentos')}>
+                        Ir para agenda
+                      </Button>
+                      <Button size="small" color="warning" onClick={() => resolveEmergencyRequest(request.id)}>
+                        Marcar atendido
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          )}
+        </Paper>
+      )}
+
+      {isAdmin && (
+        <Dialog open={usersDialogOpen} onClose={() => setUsersDialogOpen(false)} fullWidth maxWidth="sm">
+          <DialogTitle>Usuarios cadastrados</DialogTitle>
+          <DialogContent dividers>
+            <Stack spacing={1}>
+              <Typography variant="body2" color="text.secondary">
+                Total: {registeredUsers.length} | Online agora: {onlineUsersCount}
+              </Typography>
+              <Divider />
+              {isUsersListLoading && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                  <CircularProgress size={26} />
+                </Box>
+              )}
+              {!isUsersListLoading && usersListError && <Alert severity="error">{usersListError}</Alert>}
+              {!isUsersListLoading && !usersListError && (
+                <List disablePadding>
+                  {registeredUsers.map((user) => (
+                    <ListItem
+                      key={user.uid}
+                      disablePadding
+                      sx={{
+                        py: 1.1,
+                        borderBottom: '1px solid',
+                        borderColor: 'divider',
+                      }}
+                      secondaryAction={
+                        <Chip
+                          size="small"
+                          label={user.isOnline ? 'Online' : 'Offline'}
+                          color={user.isOnline ? 'success' : 'default'}
+                          variant={user.isOnline ? 'filled' : 'outlined'}
+                        />
+                      }
+                    >
+                      <ListItemText
+                        primary={user.email || 'sem email'}
+                        secondary={`Perfil: ${user.role || 'usuario'} | Ultima atividade: ${formatLastSeen(user.lastSeenAt)}`}
+                      />
+                    </ListItem>
+                  ))}
+                  {registeredUsers.length === 0 && (
+                    <Typography variant="body2" color="text.secondary" sx={{ py: 1 }}>
+                      Nenhum usuario cadastrado.
+                    </Typography>
+                  )}
+                </List>
+              )}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={loadRegisteredUsers}>Atualizar</Button>
+            <Button onClick={() => setUsersDialogOpen(false)} variant="contained">
+              Fechar
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
 
       <div className="dashboard-cards">
         {cards.map((card) => (

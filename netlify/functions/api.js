@@ -15,12 +15,16 @@ const CORS_HEADERS = {
 const JWT_SECRET = process.env.JWT_SECRET || process.env.NETLIFY_JWT_SECRET || 'change-this-secret-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 const ONLINE_WINDOW_SECONDS = 120;
+const LOCKED_ADMIN_EMAIL = String(process.env.NEOMED_ADMIN_EMAIL || 'admin@neomed.com').trim().toLowerCase();
+const LOCKED_ADMIN_PASSWORD = String(process.env.NEOMED_ADMIN_PASSWORD || 'admin123');
+const LOCKED_ADMIN_NAME = String(process.env.NEOMED_ADMIN_NAME || 'Administrador').trim();
 const DEFAULT_MEVO_LOGIN_URL = 'https://receita.mevosaude.com.br';
 const DEFAULT_MEVO_EMBED_URL = 'https://receita.mevosaude.com.br';
 const DEFAULT_MEVO_BIRD_ID_AUTH_URL =
   'https://birdid-certificadodigital.com.br/?utm_source=birdid&utm_medium=birdid&utm_campaign=birdid&gad_source=1&gad_campaignid=22504060543&gbraid=0AAAAA_fzDabxDstFCrUKb_wWSc7srKVow&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D4V4-EsbBH8bPgzzA49IcrviU-ZDzyjmvcrSoIDca2_OIK2Yj7Zv2EaAmEuEALw_wcB';
 const DEFAULT_MEVO_VIDDAS_AUTH_URL =
   'https://validcertificadora.com.br/pages/certificado-em-nuvem/d36toyotas503341?utm_source=google&utm_medium=cpc&utm_campaign=%5BSearch%5D+%5BBrasil%5D+Certificado+Digital&utm_content=Certificado+Digital&utm_term=b_&gad_source=1&gad_campaignid=22325218706&gbraid=0AAAAADleBNm7VmqWk6O20qYtaRltq0XF_&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D6it02PqENrLEPIoHiQsf5dij4kI8-GWeB6sEWFrsTDJFh_BKlKxUYaAteLEALw_wcB';
+const DEFAULT_VIDEO_CALL_BASE_URL = 'https://meet.jit.si';
 
 let pool;
 let schemaReadyPromise;
@@ -69,13 +73,23 @@ const ensureSchema = async () => {
           email TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL,
           name TEXT NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('admin', 'doctor', 'nurse', 'receptionist')),
+          role TEXT NOT NULL CHECK (role IN ('admin', 'doctor', 'nurse', 'receptionist', 'patient')),
+          doctor_id TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           last_seen_at TIMESTAMPTZ
         );
 
         ALTER TABLE neomed_users
         ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+
+        ALTER TABLE neomed_users
+        ADD COLUMN IF NOT EXISTS doctor_id TEXT;
+
+        ALTER TABLE neomed_users
+        DROP CONSTRAINT IF EXISTS neomed_users_role_check;
+
+        ALTER TABLE neomed_users
+        ADD CONSTRAINT neomed_users_role_check CHECK (role IN ('admin', 'doctor', 'nurse', 'receptionist', 'patient'));
 
         CREATE TABLE IF NOT EXISTS neomed_user_data (
           user_id TEXT NOT NULL REFERENCES neomed_users(id) ON DELETE CASCADE,
@@ -110,6 +124,45 @@ const ensureSchema = async () => {
 
         CREATE INDEX IF NOT EXISTS idx_neomed_mevo_prescription_id
         ON neomed_mevo_documents (prescription_id);
+
+        CREATE TABLE IF NOT EXISTS neomed_emergency_requests (
+          id TEXT PRIMARY KEY,
+          patient_id TEXT NOT NULL REFERENCES neomed_users(id) ON DELETE CASCADE,
+          doctor_id TEXT,
+          patient_name TEXT NOT NULL,
+          patient_email TEXT,
+          patient_phone TEXT,
+          message TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('open', 'resolved')) DEFAULT 'open',
+          resolved_by TEXT,
+          resolved_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_neomed_emergency_status
+        ON neomed_emergency_requests (status);
+
+        CREATE INDEX IF NOT EXISTS idx_neomed_emergency_patient_id
+        ON neomed_emergency_requests (patient_id);
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS attending_doctor_id TEXT;
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS attending_doctor_name TEXT;
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS attending_doctor_email TEXT;
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS video_call_url TEXT;
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS video_call_provider TEXT;
+
+        ALTER TABLE neomed_emergency_requests
+        ADD COLUMN IF NOT EXISTS video_call_started_at TIMESTAMPTZ;
       `)
       .catch((error) => {
         schemaReadyPromise = null;
@@ -118,6 +171,67 @@ const ensureSchema = async () => {
   }
 
   await schemaReadyPromise;
+};
+
+const ensureLockedAdminAccount = async () => {
+  const db = getPool();
+  const expectedName = LOCKED_ADMIN_NAME || LOCKED_ADMIN_EMAIL.split('@')[0];
+
+  const existingResult = await db.query(
+    `
+      SELECT id, email, name, role, doctor_id, password_hash, created_at, last_seen_at
+      FROM neomed_users
+      WHERE email = $1
+      LIMIT 1;
+    `,
+    [LOCKED_ADMIN_EMAIL]
+  );
+
+  if (!existingResult.rows[0]) {
+    const passwordHash = await bcrypt.hash(LOCKED_ADMIN_PASSWORD, 10);
+    await db.query(
+      `
+        INSERT INTO neomed_users (id, email, password_hash, name, role, doctor_id, last_seen_at)
+        VALUES ($1, $2, $3, $4, 'admin', NULL, NOW());
+      `,
+      [randomUUID(), LOCKED_ADMIN_EMAIL, passwordHash, expectedName]
+    );
+    return;
+  }
+
+  const user = existingResult.rows[0];
+  const passwordMatches = user.password_hash ? await bcrypt.compare(LOCKED_ADMIN_PASSWORD, user.password_hash) : false;
+  const shouldUpdate =
+    user.role !== 'admin' ||
+    !!user.doctor_id ||
+    !passwordMatches ||
+    !String(user.name || '').trim();
+
+  if (shouldUpdate) {
+    const passwordHash = passwordMatches ? user.password_hash : await bcrypt.hash(LOCKED_ADMIN_PASSWORD, 10);
+    await db.query(
+      `
+        UPDATE neomed_users
+        SET role = 'admin',
+            doctor_id = NULL,
+            name = $2,
+            password_hash = $3,
+            last_seen_at = COALESCE(last_seen_at, NOW())
+        WHERE id = $1;
+      `,
+      [user.id, String(user.name || '').trim() || expectedName, passwordHash]
+    );
+  }
+
+  await db.query(
+    `
+      UPDATE neomed_users
+      SET role = 'doctor',
+          doctor_id = NULL
+      WHERE role = 'admin' AND LOWER(email) <> $1;
+    `,
+    [LOCKED_ADMIN_EMAIL]
+  );
 };
 
 const jsonResponse = (statusCode, body) => ({
@@ -166,6 +280,13 @@ const sanitizeUser = (user) => ({
   photoURL: null,
 });
 
+const sanitizeDoctorForSignup = (user) => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+});
+
 const getAuthorizationHeader = (event) => {
   if (!event.headers) {
     return null;
@@ -210,7 +331,7 @@ const markUserSeen = async (userId) => {
       UPDATE neomed_users
       SET last_seen_at = NOW()
       WHERE id = $1
-      RETURNING id, email, name, role, created_at, last_seen_at;
+      RETURNING id, email, name, role, doctor_id, created_at, last_seen_at;
     `,
     [userId]
   );
@@ -233,7 +354,7 @@ const requireAuth = async (event) => {
 
   const db = getPool();
   const userResult = await db.query(
-    `SELECT id, email, name, role, created_at, last_seen_at FROM neomed_users WHERE id = $1 LIMIT 1;`,
+    `SELECT id, email, name, role, doctor_id, created_at, last_seen_at FROM neomed_users WHERE id = $1 LIMIT 1;`,
     [decoded.sub]
   );
 
@@ -260,6 +381,8 @@ const resolveTargetUserId = (authUser, event, body) => {
 
   return authUser.id;
 };
+
+const isPatientUser = (user) => String(user?.role || '').toLowerCase() === 'patient';
 
 const upsertData = async (userId, dataType, payload) => {
   const db = getPool();
@@ -319,9 +442,353 @@ const loadDataType = async (userId, dataType) => {
   return result.rows[0].payload;
 };
 
+const upsertLinkedPatientForDoctor = async ({ doctorId, patientProfile }) => {
+  const existingPatients = await loadDataType(doctorId, 'patients');
+  const patientList = Array.isArray(existingPatients) ? [...existingPatients] : [];
+  const cpfDigits = onlyDigits(patientProfile.cpf || '');
+
+  const existingIndex = patientList.findIndex((patient) => {
+    if (!patient || typeof patient !== 'object') {
+      return false;
+    }
+
+    if (String(patient.id || '') === patientProfile.id || String(patient.linkedUserId || '') === patientProfile.linkedUserId) {
+      return true;
+    }
+
+    return cpfDigits && onlyDigits(patient.cpf || '') === cpfDigits;
+  });
+
+  if (existingIndex >= 0) {
+    patientList[existingIndex] = {
+      ...patientList[existingIndex],
+      ...patientProfile,
+      id: patientList[existingIndex].id || patientProfile.id,
+      linkedUserId: patientProfile.linkedUserId,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    patientList.push(patientProfile);
+  }
+
+  await upsertData(doctorId, 'patients', patientList);
+};
+
+const findLinkedPatientProfile = (doctorData, authUser) => {
+  const doctorPatients = Array.isArray(doctorData?.patients) ? doctorData.patients : [];
+  const patientId = String(authUser.id || '');
+  const patientEmail = String(authUser.email || '').toLowerCase();
+
+  return (
+    doctorPatients.find((patient) => {
+      if (!patient || typeof patient !== 'object') {
+        return false;
+      }
+
+      if (String(patient.id || '') === patientId || String(patient.linkedUserId || '') === patientId) {
+        return true;
+      }
+
+      return patientEmail && String(patient.email || '').toLowerCase() === patientEmail;
+    }) || null
+  );
+};
+
+const buildPatientScopedData = async (authUser) => {
+  const doctorId = String(authUser?.doctor_id || authUser?.doctorId || '').trim();
+  if (!doctorId) {
+    return {
+      patients: [],
+      prescriptions: [],
+      appointments: [],
+      medicalRecords: [],
+    };
+  }
+
+  const doctorData = await loadAllData(doctorId);
+  const patientId = String(authUser.id);
+  const patientEmail = String(authUser.email || '').toLowerCase();
+  const doctorPatients = Array.isArray(doctorData.patients) ? doctorData.patients : [];
+  const doctorPrescriptions = Array.isArray(doctorData.prescriptions) ? doctorData.prescriptions : [];
+  const doctorAppointments = Array.isArray(doctorData.appointments) ? doctorData.appointments : [];
+
+  const patients = doctorPatients.filter((patient) => {
+    if (!patient || typeof patient !== 'object') {
+      return false;
+    }
+
+    if (String(patient.id || '') === patientId || String(patient.linkedUserId || '') === patientId) {
+      return true;
+    }
+
+    return patientEmail && String(patient.email || '').toLowerCase() === patientEmail;
+  });
+
+  const prescriptions = doctorPrescriptions.filter((prescription) => {
+    if (!prescription || typeof prescription !== 'object') {
+      return false;
+    }
+
+    return String(prescription.patientId || '') === patientId;
+  });
+
+  const appointments = doctorAppointments.filter((appointment) => {
+    if (!appointment || typeof appointment !== 'object') {
+      return false;
+    }
+
+    return String(appointment.patientId || '') === patientId;
+  });
+
+  return {
+    patients,
+    prescriptions,
+    appointments,
+    medicalRecords: [],
+  };
+};
+
+const createEmergencyRequest = async ({ patientId, doctorId, patientName, patientEmail, patientPhone, message }) => {
+  const db = getPool();
+  const now = new Date().toISOString();
+
+  const existingResult = await db.query(
+    `
+      SELECT id, created_at
+      FROM neomed_emergency_requests
+      WHERE patient_id = $1 AND status = 'open'
+      LIMIT 1;
+    `,
+    [patientId]
+  );
+
+  if (existingResult.rows[0]) {
+    const existing = existingResult.rows[0];
+    const updateResult = await db.query(
+      `
+        UPDATE neomed_emergency_requests
+        SET doctor_id = $2,
+            patient_name = $3,
+            patient_email = $4,
+            patient_phone = $5,
+            message = $6,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *;
+      `,
+      [existing.id, doctorId || null, patientName, patientEmail || null, patientPhone || null, message]
+    );
+
+    return updateResult.rows[0];
+  }
+
+  const insertResult = await db.query(
+    `
+      INSERT INTO neomed_emergency_requests (
+        id,
+        patient_id,
+        doctor_id,
+        patient_name,
+        patient_email,
+        patient_phone,
+        attending_doctor_id,
+        attending_doctor_name,
+        attending_doctor_email,
+        video_call_url,
+        video_call_provider,
+        video_call_started_at,
+        message,
+        status,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, NULL, NULL, NULL, NULL, $7, 'open', NOW(), NOW())
+      RETURNING *;
+    `,
+    [randomUUID(), patientId, doctorId || null, patientName, patientEmail || null, patientPhone || null, message]
+  );
+
+  return insertResult.rows[0];
+};
+
+const listActiveEmergencyRequests = async () => {
+  const db = getPool();
+  const result = await db.query(
+    `
+      SELECT
+        er.*,
+        u.last_seen_at AS patient_last_seen_at,
+        (COALESCE(u.last_seen_at, '1970-01-01'::timestamptz) >= NOW() - INTERVAL '${ONLINE_WINDOW_SECONDS} seconds') AS patient_online
+      FROM neomed_emergency_requests er
+      JOIN neomed_users u ON u.id = er.patient_id
+      WHERE er.status = 'open'
+      ORDER BY er.updated_at DESC;
+    `
+  );
+
+  return result.rows
+    .filter((row) => Boolean(row.patient_online))
+    .map((row) => ({
+      id: row.id,
+      patientId: row.patient_id,
+      patientName: row.patient_name,
+      patientEmail: row.patient_email,
+      patientPhone: row.patient_phone,
+      doctorId: row.doctor_id,
+      attendingDoctorId: row.attending_doctor_id || null,
+      attendingDoctorName: row.attending_doctor_name || null,
+      attendingDoctorEmail: row.attending_doctor_email || null,
+      videoCallUrl: row.video_call_url || null,
+      videoCallProvider: row.video_call_provider || null,
+      videoCallStartedAt: row.video_call_started_at || null,
+      message: row.message,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      isPatientOnline: Boolean(row.patient_online),
+      patientLastSeenAt: row.patient_last_seen_at || null,
+    }));
+};
+
+const getLatestEmergencyRequestByPatient = async ({ patientId }) => {
+  const db = getPool();
+  const result = await db.query(
+    `
+      SELECT *
+      FROM neomed_emergency_requests
+      WHERE patient_id = $1
+      ORDER BY
+        CASE WHEN status = 'open' THEN 0 ELSE 1 END ASC,
+        updated_at DESC
+      LIMIT 1;
+    `,
+    [patientId]
+  );
+
+  return result.rows[0] || null;
+};
+
+const startEmergencyVideoCall = async ({ requestId, doctorUser, callUrl }) => {
+  const db = getPool();
+  const currentResult = await db.query(
+    `
+      SELECT *
+      FROM neomed_emergency_requests
+      WHERE id = $1
+      LIMIT 1;
+    `,
+    [requestId]
+  );
+
+  const current = currentResult.rows[0];
+  if (!current) {
+    return null;
+  }
+
+  if (String(current.status || '') === 'resolved') {
+    throw appError(400, 'doctor/emergency-already-resolved', 'Emergency request is already resolved.');
+  }
+
+  const videoCallUrl = String(callUrl || '').trim() || current.video_call_url || buildEmergencyVideoCallUrl(requestId);
+
+  const updateResult = await db.query(
+    `
+      UPDATE neomed_emergency_requests
+      SET attending_doctor_id = $2,
+          attending_doctor_name = $3,
+          attending_doctor_email = $4,
+          video_call_url = $5,
+          video_call_provider = 'meet',
+          video_call_started_at = NOW(),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *;
+    `,
+    [requestId, doctorUser.id, doctorUser.name || doctorUser.email || 'Medico', doctorUser.email || null, videoCallUrl]
+  );
+
+  return updateResult.rows[0] || null;
+};
+
+const resolveEmergencyRequest = async ({ requestId, resolvedBy }) => {
+  const db = getPool();
+  const result = await db.query(
+    `
+      UPDATE neomed_emergency_requests
+      SET status = 'resolved',
+          resolved_by = $2,
+          resolved_at = NOW(),
+          updated_at = NOW()
+      WHERE id = $1
+      RETURNING *;
+    `,
+    [requestId, resolvedBy]
+  );
+
+  return result.rows[0] || null;
+};
+
 const isValidEmail = (email) => /\S+@\S+\.\S+/.test(email);
+const onlyDigits = (value) => String(value || '').replace(/\D/g, '');
+const isDoctorRole = (role) => ['admin', 'doctor'].includes(String(role || '').toLowerCase());
+const normalizeGender = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['male', 'female', 'other'].includes(normalized)) {
+    return normalized;
+  }
+  return 'other';
+};
+const isValidCpf = (value) => {
+  const cpf = onlyDigits(value);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) {
+    return false;
+  }
+
+  const calcDigit = (base, factor) => {
+    let total = 0;
+    for (const digit of base) {
+      total += Number(digit) * factor;
+      factor -= 1;
+    }
+    const mod = total % 11;
+    return mod < 2 ? 0 : 11 - mod;
+  };
+
+  const digit1 = calcDigit(cpf.slice(0, 9), 10);
+  const digit2 = calcDigit(cpf.slice(0, 10), 11);
+  return digit1 === Number(cpf[9]) && digit2 === Number(cpf[10]);
+};
 const isValidMevoDocumentType = (documentType) => ['prescription', 'certificate'].includes(documentType);
 const isValidMevoSignatureProvider = (provider) => ['bird_id', 'viddas'].includes(provider);
+
+const buildPatientProfileFromPayload = ({ profile, fallbackName, fallbackEmail, linkedUserId }) => {
+  const safeProfile = profile && typeof profile === 'object' ? profile : {};
+  const dateOfBirth = String(safeProfile.dateOfBirth || safeProfile.birthDate || '').trim();
+  const cpf = String(safeProfile.cpf || '').trim();
+  const phone = String(safeProfile.phone || '').trim();
+
+  return {
+    id: linkedUserId,
+    linkedUserId,
+    name: String(safeProfile.name || fallbackName || '').trim(),
+    cpf,
+    email: String(safeProfile.email || fallbackEmail || '').trim(),
+    phone,
+    dateOfBirth,
+    birthDate: dateOfBirth,
+    gender: normalizeGender(safeProfile.gender),
+    address: String(safeProfile.address || '').trim(),
+    healthInsurance: String(safeProfile.healthInsurance || '').trim(),
+    bloodType: String(safeProfile.bloodType || '').trim(),
+    medicalHistory: String(safeProfile.medicalHistory || '').trim(),
+    allergies: Array.isArray(safeProfile.allergies) ? safeProfile.allergies : [],
+    medications: Array.isArray(safeProfile.medications) ? safeProfile.medications : [],
+    cid10Code: String(safeProfile.cid10Code || '').trim(),
+    cid10Description: String(safeProfile.cid10Description || '').trim(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+};
 
 const getMevoSignatureProviderLabel = (provider) => (provider === 'bird_id' ? 'Bird ID' : 'Viddas');
 
@@ -350,6 +817,59 @@ const getMevoSignatureAuthUrl = (provider) => {
 };
 
 const getMevoLoginUrl = () => process.env.MEVO_LOGIN_URL || DEFAULT_MEVO_LOGIN_URL;
+const getVideoCallBaseUrl = () => String(process.env.NEOMED_VIDEO_CALL_BASE_URL || DEFAULT_VIDEO_CALL_BASE_URL).trim();
+
+const buildEmergencyCallRoom = (requestId) => {
+  const safeRequestId = String(requestId || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '');
+  return `neomed-emergencia-${safeRequestId || Date.now()}`;
+};
+
+const buildEmergencyVideoCallUrl = (requestId) => {
+  const baseUrl = getVideoCallBaseUrl();
+  const roomName = buildEmergencyCallRoom(requestId);
+
+  if (!baseUrl) {
+    return `https://meet.jit.si/${roomName}`;
+  }
+
+  if (baseUrl.includes('{room}')) {
+    return baseUrl.replace('{room}', encodeURIComponent(roomName));
+  }
+
+  return `${baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(roomName)}`;
+};
+
+const buildPatientProfileFromEmergencyRequest = ({ request, patientUser, existingProfile }) => {
+  const now = new Date().toISOString();
+  const mergedDate = existingProfile?.dateOfBirth || existingProfile?.birthDate || '';
+  const mergedPhone = String(existingProfile?.phone || request?.patient_phone || '').trim();
+  const mergedEmail = String(existingProfile?.email || request?.patient_email || patientUser?.email || '').trim();
+  const mergedName = String(existingProfile?.name || request?.patient_name || patientUser?.name || 'Paciente').trim();
+
+  return {
+    id: String(existingProfile?.id || request?.patient_id || patientUser?.id || '').trim(),
+    linkedUserId: String(existingProfile?.linkedUserId || request?.patient_id || patientUser?.id || '').trim(),
+    name: mergedName,
+    cpf: String(existingProfile?.cpf || '').trim(),
+    email: mergedEmail,
+    phone: mergedPhone,
+    dateOfBirth: mergedDate,
+    birthDate: mergedDate,
+    gender: normalizeGender(existingProfile?.gender),
+    address: String(existingProfile?.address || '').trim(),
+    healthInsurance: String(existingProfile?.healthInsurance || '').trim(),
+    bloodType: String(existingProfile?.bloodType || '').trim(),
+    medicalHistory: String(existingProfile?.medicalHistory || '').trim(),
+    allergies: Array.isArray(existingProfile?.allergies) ? existingProfile.allergies : [],
+    medications: Array.isArray(existingProfile?.medications) ? existingProfile.medications : [],
+    cid10Code: String(existingProfile?.cid10Code || '').trim(),
+    cid10Description: String(existingProfile?.cid10Description || '').trim(),
+    createdAt: existingProfile?.createdAt || now,
+    updatedAt: now,
+  };
+};
 
 const createMevoSignatureSession = ({ provider }) => {
   const authUrl = getMevoSignatureAuthUrl(provider);
@@ -495,6 +1015,7 @@ exports.handler = async (event) => {
 
   try {
     await ensureSchema();
+    await ensureLockedAdminAccount();
 
     const db = getPool();
     const method = event.httpMethod;
@@ -505,10 +1026,31 @@ exports.handler = async (event) => {
       return jsonResponse(200, { ok: true });
     }
 
+    if (method === 'GET' && path === '/public/doctors') {
+      const doctorsResult = await db.query(
+        `
+          SELECT id, email, name, role
+          FROM neomed_users
+          WHERE role IN ('admin', 'doctor')
+          ORDER BY name ASC;
+        `
+      );
+
+      return jsonResponse(200, {
+        success: true,
+        doctors: doctorsResult.rows.map(sanitizeDoctorForSignup),
+      });
+    }
+
     if (method === 'POST' && path === '/auth/register') {
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '');
       const displayName = String(body.name || '').trim();
+      const requestedRole = String(body.role || 'doctor')
+        .trim()
+        .toLowerCase();
+      const doctorId = String(body.doctorId || '').trim();
+      const patientProfilePayload = body.patientProfile;
 
       if (!email || !isValidEmail(email)) {
         throw appError(400, 'auth/invalid-email', 'Email is invalid.');
@@ -525,20 +1067,83 @@ exports.handler = async (event) => {
 
       const usersCountResult = await db.query('SELECT COUNT(*)::int AS count FROM neomed_users;');
       const usersCount = Number(usersCountResult.rows[0].count || 0);
-      const role = usersCount === 0 ? 'admin' : 'doctor';
-      const id = randomUUID();
+      const shouldCreatePatient = usersCount > 0 && requestedRole === 'patient';
+
+      let targetDoctor = null;
+      if (shouldCreatePatient) {
+        if (!doctorId) {
+          throw appError(400, 'auth/doctor-required', 'doctorId is required for patient registrations.');
+        }
+
+        const doctorResult = await db.query(
+          `
+            SELECT id, email, name, role
+            FROM neomed_users
+            WHERE id = $1 AND role IN ('admin', 'doctor')
+            LIMIT 1;
+          `,
+          [doctorId]
+        );
+
+        targetDoctor = doctorResult.rows[0] || null;
+        if (!targetDoctor || !isDoctorRole(targetDoctor.role)) {
+          throw appError(404, 'auth/doctor-not-found', 'Selected doctor was not found or is not allowed.');
+        }
+      }
+
+      const patientProfile = shouldCreatePatient
+        ? buildPatientProfileFromPayload({
+            profile: patientProfilePayload,
+            fallbackName: displayName || email.split('@')[0],
+            fallbackEmail: email,
+            linkedUserId: randomUUID(),
+          })
+        : null;
+
+      if (shouldCreatePatient) {
+        if (!patientProfile.name) {
+          throw appError(400, 'auth/invalid-patient-name', 'Patient name is required.');
+        }
+
+        if (!patientProfile.cpf) {
+          throw appError(400, 'auth/invalid-cpf', 'Patient CPF is required.');
+        }
+
+        if (!isValidCpf(patientProfile.cpf)) {
+          throw appError(400, 'auth/invalid-cpf', 'Patient CPF is invalid.');
+        }
+
+        if (!patientProfile.phone) {
+          throw appError(400, 'auth/invalid-phone', 'Patient phone is required.');
+        }
+
+        if (!patientProfile.dateOfBirth) {
+          throw appError(400, 'auth/invalid-date-of-birth', 'Patient date of birth is required.');
+        }
+      }
+
+      const role = usersCount === 0 ? 'admin' : shouldCreatePatient ? 'patient' : 'doctor';
+      const id = shouldCreatePatient && patientProfile ? patientProfile.linkedUserId : randomUUID();
       const passwordHash = await bcrypt.hash(password, 10);
 
       const insertResult = await db.query(
         `
-          INSERT INTO neomed_users (id, email, password_hash, name, role, last_seen_at)
-          VALUES ($1, $2, $3, $4, $5, NOW())
+          INSERT INTO neomed_users (id, email, password_hash, name, role, doctor_id, last_seen_at)
+          VALUES ($1, $2, $3, $4, $5, $6, NOW())
           RETURNING id, email, name, role, created_at, last_seen_at;
         `,
-        [id, email, passwordHash, displayName || email.split('@')[0], role]
+        [id, email, passwordHash, displayName || email.split('@')[0], role, shouldCreatePatient ? doctorId : null]
       );
 
       const user = insertResult.rows[0];
+
+      if (shouldCreatePatient && targetDoctor && patientProfile) {
+        await upsertLinkedPatientForDoctor({
+          doctorId: targetDoctor.id,
+          patientProfile,
+        });
+      }
+
       const token = signToken(user);
 
       return jsonResponse(201, {
@@ -773,11 +1378,292 @@ exports.handler = async (event) => {
       });
     }
 
+    if (method === 'POST' && path === '/patient/appointments/request') {
+      const authUser = await requireAuth(event);
+      if (!isPatientUser(authUser)) {
+        throw appError(403, 'auth/forbidden', 'Only patients can request appointments from this endpoint.');
+      }
+
+      const doctorId = String(authUser.doctor_id || authUser.doctorId || '').trim();
+      if (!doctorId) {
+        throw appError(400, 'patient/doctor-not-linked', 'Patient account is not linked to a doctor.');
+      }
+
+      const date = String(body.date || '').trim();
+      const time = String(body.time || '').trim();
+      const notes = String(body.notes || '').trim();
+      const reason = String(body.reason || 'Consulta solicitada pelo paciente').trim();
+
+      if (!date || !time) {
+        throw appError(400, 'patient/invalid-appointment', 'date and time are required.');
+      }
+
+      const doctorResult = await db.query(
+        `
+          SELECT id, email, name, role
+          FROM neomed_users
+          WHERE id = $1 AND role IN ('admin', 'doctor')
+          LIMIT 1;
+        `,
+        [doctorId]
+      );
+
+      if (!doctorResult.rows[0]) {
+        throw appError(404, 'patient/doctor-not-found', 'Linked doctor was not found.');
+      }
+
+      const doctorData = await loadAllData(doctorId);
+      const linkedPatient = findLinkedPatientProfile(doctorData, authUser);
+      const doctorAppointments = Array.isArray(doctorData.appointments) ? [...doctorData.appointments] : [];
+
+      const appointment = {
+        id: `apt_${randomUUID()}`,
+        patientId: authUser.id,
+        date,
+        time,
+        status: 'scheduled',
+        reason,
+        notes,
+        requestedAt: new Date().toISOString(),
+        requestedByPatient: true,
+        patientName: linkedPatient?.name || authUser.name || authUser.email || 'Paciente',
+        patientEmail: authUser.email || '',
+        source: 'patient_portal',
+      };
+
+      doctorAppointments.push(appointment);
+      await upsertData(doctorId, 'appointments', doctorAppointments);
+
+      return jsonResponse(201, {
+        success: true,
+        appointment,
+        doctor: sanitizeDoctorForSignup(doctorResult.rows[0]),
+      });
+    }
+
+    if (method === 'POST' && path === '/patient/emergency/request') {
+      const authUser = await requireAuth(event);
+      if (!isPatientUser(authUser)) {
+        throw appError(403, 'auth/forbidden', 'Only patients can request emergency support.');
+      }
+
+      const doctorId = String(authUser.doctor_id || authUser.doctorId || '').trim();
+      if (!doctorId) {
+        throw appError(400, 'patient/doctor-not-linked', 'Patient account is not linked to a doctor.');
+      }
+
+      const message = String(body.message || '').trim() || 'Paciente solicitou atendimento de emergencia.';
+      const doctorData = await loadAllData(doctorId);
+      const linkedPatient = findLinkedPatientProfile(doctorData, authUser);
+
+      const request = await createEmergencyRequest({
+        patientId: authUser.id,
+        doctorId,
+        patientName: linkedPatient?.name || authUser.name || authUser.email || 'Paciente',
+        patientEmail: authUser.email || '',
+        patientPhone: String(linkedPatient?.phone || '').trim(),
+        message,
+      });
+
+      return jsonResponse(200, {
+        success: true,
+        request: {
+          id: request.id,
+          patientId: request.patient_id,
+          patientName: request.patient_name,
+          patientEmail: request.patient_email,
+          patientPhone: request.patient_phone,
+          doctorId: request.doctor_id,
+          attendingDoctorId: request.attending_doctor_id || null,
+          attendingDoctorName: request.attending_doctor_name || null,
+          attendingDoctorEmail: request.attending_doctor_email || null,
+          videoCallUrl: request.video_call_url || null,
+          videoCallProvider: request.video_call_provider || null,
+          videoCallStartedAt: request.video_call_started_at || null,
+          message: request.message,
+          status: request.status,
+          createdAt: request.created_at,
+          updatedAt: request.updated_at,
+        },
+      });
+    }
+
+    if (method === 'GET' && path === '/patient/emergency/latest') {
+      const authUser = await requireAuth(event);
+      if (!isPatientUser(authUser)) {
+        throw appError(403, 'auth/forbidden', 'Only patients can access this endpoint.');
+      }
+
+      const latest = await getLatestEmergencyRequestByPatient({ patientId: authUser.id });
+      if (!latest) {
+        return jsonResponse(200, { success: true, request: null });
+      }
+
+      return jsonResponse(200, {
+        success: true,
+        request: {
+          id: latest.id,
+          patientId: latest.patient_id,
+          patientName: latest.patient_name,
+          patientEmail: latest.patient_email,
+          patientPhone: latest.patient_phone,
+          doctorId: latest.doctor_id,
+          attendingDoctorId: latest.attending_doctor_id || null,
+          attendingDoctorName: latest.attending_doctor_name || null,
+          attendingDoctorEmail: latest.attending_doctor_email || null,
+          videoCallUrl: latest.video_call_url || null,
+          videoCallProvider: latest.video_call_provider || null,
+          videoCallStartedAt: latest.video_call_started_at || null,
+          message: latest.message,
+          status: latest.status,
+          createdAt: latest.created_at,
+          updatedAt: latest.updated_at,
+          resolvedAt: latest.resolved_at || null,
+          resolvedBy: latest.resolved_by || null,
+        },
+      });
+    }
+
+    if (method === 'GET' && path === '/doctor/emergency/requests') {
+      const authUser = await requireAuth(event);
+      if (!isDoctorRole(authUser.role)) {
+        throw appError(403, 'auth/forbidden', 'Only doctors and admins can view emergency requests.');
+      }
+
+      const requests = await listActiveEmergencyRequests();
+      return jsonResponse(200, {
+        success: true,
+        requests,
+      });
+    }
+
+    const startVideoMatch = path.match(/^\/doctor\/emergency\/([^/]+)\/start-video$/);
+    if (method === 'POST' && startVideoMatch) {
+      const authUser = await requireAuth(event);
+      if (!isDoctorRole(authUser.role)) {
+        throw appError(403, 'auth/forbidden', 'Only doctors and admins can start emergency video calls.');
+      }
+
+      const requestId = String(startVideoMatch[1] || '').trim();
+      if (!requestId) {
+        throw appError(400, 'doctor/invalid-emergency-request', 'requestId is required.');
+      }
+
+      const started = await startEmergencyVideoCall({
+        requestId,
+        doctorUser: authUser,
+        callUrl: body.callUrl ? String(body.callUrl) : '',
+      });
+
+      if (!started) {
+        throw appError(404, 'doctor/emergency-request-not-found', 'Emergency request not found.');
+      }
+
+      const patientResult = await db.query(
+        `
+          SELECT id, email, name
+          FROM neomed_users
+          WHERE id = $1
+          LIMIT 1;
+        `,
+        [started.patient_id]
+      );
+      const patientUser = patientResult.rows[0] || null;
+
+      const attendingDoctorData = await loadAllData(authUser.id);
+      const sourceDoctorData = started.doctor_id ? await loadAllData(started.doctor_id) : { patients: [] };
+      const patientLookupAuth = {
+        id: started.patient_id,
+        email: started.patient_email || patientUser?.email || '',
+      };
+
+      const existingInAttending = findLinkedPatientProfile(attendingDoctorData, patientLookupAuth);
+      const existingInSource = findLinkedPatientProfile(sourceDoctorData, patientLookupAuth);
+      const profileToLink = buildPatientProfileFromEmergencyRequest({
+        request: started,
+        patientUser,
+        existingProfile: existingInAttending || existingInSource,
+      });
+
+      await upsertLinkedPatientForDoctor({
+        doctorId: authUser.id,
+        patientProfile: profileToLink,
+      });
+
+      return jsonResponse(200, {
+        success: true,
+        request: {
+          id: started.id,
+          patientId: started.patient_id,
+          patientName: started.patient_name,
+          patientEmail: started.patient_email,
+          patientPhone: started.patient_phone,
+          doctorId: started.doctor_id,
+          attendingDoctorId: started.attending_doctor_id || null,
+          attendingDoctorName: started.attending_doctor_name || null,
+          attendingDoctorEmail: started.attending_doctor_email || null,
+          videoCallUrl: started.video_call_url || null,
+          videoCallProvider: started.video_call_provider || null,
+          videoCallStartedAt: started.video_call_started_at || null,
+          message: started.message,
+          status: started.status,
+          createdAt: started.created_at,
+          updatedAt: started.updated_at,
+        },
+      });
+    }
+
+    const resolveEmergencyMatch = path.match(/^\/doctor\/emergency\/([^/]+)\/resolve$/);
+    if (method === 'POST' && resolveEmergencyMatch) {
+      const authUser = await requireAuth(event);
+      if (!isDoctorRole(authUser.role)) {
+        throw appError(403, 'auth/forbidden', 'Only doctors and admins can resolve emergency requests.');
+      }
+
+      const requestId = String(resolveEmergencyMatch[1] || '').trim();
+      if (!requestId) {
+        throw appError(400, 'doctor/invalid-emergency-request', 'requestId is required.');
+      }
+
+      const resolved = await resolveEmergencyRequest({ requestId, resolvedBy: authUser.id });
+      if (!resolved) {
+        throw appError(404, 'doctor/emergency-request-not-found', 'Emergency request not found.');
+      }
+
+      return jsonResponse(200, {
+        success: true,
+        request: {
+          id: resolved.id,
+          patientId: resolved.patient_id,
+          patientName: resolved.patient_name,
+          patientEmail: resolved.patient_email,
+          patientPhone: resolved.patient_phone,
+          doctorId: resolved.doctor_id,
+          attendingDoctorId: resolved.attending_doctor_id || null,
+          attendingDoctorName: resolved.attending_doctor_name || null,
+          attendingDoctorEmail: resolved.attending_doctor_email || null,
+          videoCallUrl: resolved.video_call_url || null,
+          videoCallProvider: resolved.video_call_provider || null,
+          videoCallStartedAt: resolved.video_call_started_at || null,
+          message: resolved.message,
+          status: resolved.status,
+          createdAt: resolved.created_at,
+          updatedAt: resolved.updated_at,
+          resolvedAt: resolved.resolved_at,
+          resolvedBy: resolved.resolved_by,
+        },
+      });
+    }
+
     // Data endpoints (require auth)
     const authUser = await requireAuth(event);
-    const targetUserId = resolveTargetUserId(authUser, event, body);
 
     if (method === 'POST' && path === '/saveAll') {
+      if (isPatientUser(authUser)) {
+        throw appError(403, 'auth/patient-readonly', 'Patients cannot modify global clinic data.');
+      }
+
+      const targetUserId = resolveTargetUserId(authUser, event, body);
       const payload = body || {};
 
       for (const dataType of DATA_TYPES) {
@@ -793,7 +1679,7 @@ exports.handler = async (event) => {
     }
 
     if (method === 'GET' && path === '/all') {
-      const data = await loadAllData(targetUserId);
+      const data = isPatientUser(authUser) ? await buildPatientScopedData(authUser) : await loadAllData(resolveTargetUserId(authUser, event, body));
       return jsonResponse(200, {
         success: true,
         ...data,
@@ -802,8 +1688,13 @@ exports.handler = async (event) => {
 
     const saveMatch = path.match(/^\/(patients|prescriptions|appointments|medicalRecords)\/save$/);
     if (method === 'POST' && saveMatch) {
+      if (isPatientUser(authUser)) {
+        throw appError(403, 'auth/patient-readonly', 'Patients cannot modify global clinic data.');
+      }
+
       const dataType = saveMatch[1];
       const payload = body.data !== undefined ? body.data : body;
+      const targetUserId = resolveTargetUserId(authUser, event, body);
       await upsertData(targetUserId, dataType, payload);
 
       return jsonResponse(200, {
@@ -815,7 +1706,9 @@ exports.handler = async (event) => {
     const getMatch = path.match(/^\/(patients|prescriptions|appointments|medicalRecords)$/);
     if (method === 'GET' && getMatch) {
       const dataType = getMatch[1];
-      const payload = await loadDataType(targetUserId, dataType);
+      const payload = isPatientUser(authUser)
+        ? (await buildPatientScopedData(authUser))[dataType] || []
+        : await loadDataType(resolveTargetUserId(authUser, event, body), dataType);
 
       return jsonResponse(200, {
         success: true,

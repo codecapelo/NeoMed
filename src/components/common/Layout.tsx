@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   AppBar,
@@ -88,6 +88,7 @@ export default function Layout({ children }: LayoutProps) {
   const { logout, currentUser } = useAuth();
   const apiBase = useMemo(() => getApiBase(), []);
   const { patients, prescriptions, appointments, medicalRecords } = useData();
+  const isPatient = currentUser?.role === 'patient';
 
   const userEmail = useMemo(() => {
     if (!currentUser || typeof currentUser !== 'object') {
@@ -116,6 +117,23 @@ export default function Layout({ children }: LayoutProps) {
 
     return 'Usuario';
   }, [currentUser]);
+
+  const visibleMenuItems = useMemo(() => {
+    if (isPatient) {
+      return menuItems.filter((item) => item.path === '/prescricoes');
+    }
+    return menuItems;
+  }, [isPatient]);
+
+  useEffect(() => {
+    if (!isPatient) {
+      return;
+    }
+
+    if (location.pathname !== '/prescricoes') {
+      navigate('/prescricoes', { replace: true });
+    }
+  }, [isPatient, location.pathname, navigate]);
 
   const handleDrawerToggle = () => {
     setMobileOpen((prev) => !prev);
@@ -210,7 +228,7 @@ export default function Layout({ children }: LayoutProps) {
       </Toolbar>
       <Divider sx={{ borderColor: 'rgba(216, 246, 251, 0.15)' }} />
       <List sx={{ mt: 1, px: 1 }}>
-        {menuItems.map((item) => (
+        {visibleMenuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton selected={location.pathname === item.path} onClick={() => handleNavigation(item.path)}>
               <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>{item.icon}</ListItemIcon>
@@ -260,24 +278,26 @@ export default function Layout({ children }: LayoutProps) {
                 Prontuario Clinico NeoMed
               </Typography>
               <Typography variant="caption" sx={{ color: 'rgba(235, 247, 250, 0.9)' }}>
-                Fluxo medico mais rapido e consistente
+                {isPatient ? 'Acesso do paciente' : 'Fluxo medico mais rapido e consistente'}
               </Typography>
             </Box>
           </Box>
 
-          <Tooltip title="Salvar no servidor">
-            <span>
-              <Button
-                color="inherit"
-                startIcon={<SaveIcon />}
-                onClick={handleSaveAllData}
-                disabled={savingData}
-                sx={{ ml: 1 }}
-              >
-                {savingData ? 'Salvando...' : 'Salvar'}
-              </Button>
-            </span>
-          </Tooltip>
+          {!isPatient && (
+            <Tooltip title="Salvar no servidor">
+              <span>
+                <Button
+                  color="inherit"
+                  startIcon={<SaveIcon />}
+                  onClick={handleSaveAllData}
+                  disabled={savingData}
+                  sx={{ ml: 1 }}
+                >
+                  {savingData ? 'Salvando...' : 'Salvar'}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
 
           <Tooltip title="Sair">
             <Button color="inherit" startIcon={<LogoutIcon />} onClick={handleLogout} sx={{ ml: 1 }}>
